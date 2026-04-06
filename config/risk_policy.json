@@ -1,0 +1,29 @@
+{
+  "bot_name": "Ouroboros_v2",
+  "version": "1.0.0",
+  "starting_capital": 3000,
+  "neutrality_priority": {
+    "asset_mapping": {
+      "TLT": "US-Bonds",
+      "CCJ": "Canada-Uranium",
+      "ZIM": "Global-Shipping",
+      "GLD": "Global-Gold",
+      "D05.SI": "Singapore-Bank",
+      "BDRY": "Global-Logistics",
+      "8035.T": "Tokyo-Tech",
+      "VALE": "Brazil-Mining",
+      "XAUUSD": "Global-Gold",
+      "XAGUSD": "Global-Silver"
+    }
+  },
+  "boycott_list": [
+    "TEVA",
+    "ESLT",
+    "MCD"
+  ],
+  "risk_parameters": {
+    "max_position_size_usd": 450,
+    "sentiment_threshold": -0.2,
+    "session_filter_active": true
+  }
+}
