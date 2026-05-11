@@ -8,7 +8,7 @@
   "stop_loss_pct": 0.01,
   "take_profit_pct": 0.02,
   "max_trades_per_session": 3,
-  "session_filter": true,
+  "session_filter": false,
   "sessions": {
     "london":  {"start_hour": 3,  "end_hour": 5},
     "ny":      {"start_hour": 8,  "end_hour": 11},
