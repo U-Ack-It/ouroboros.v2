@@ -30,6 +30,7 @@ from typing import Optional
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
 
 from portfolio.ledger import load_trades, load_open_positions, update_trade
+from portfolio.trade_memory import append_outcome
 from src.core.broker.schwab_client import SchwabClient
 from src.notifications.telegram import TelegramNotifier
 
@@ -80,6 +81,7 @@ class PositionManager:
 
             if result:
                 update_trade(pos["id"], result)
+                append_outcome(pos, result)
                 closed += 1
                 self._notifier.send_execution(
                     ticker      = pos.get("ticker", "?"),
@@ -289,14 +291,16 @@ class PositionManager:
             pnl_pct = round(pnl_usd / pos_usd * 100, 4) if pos_usd else 0.0
             outcome = "WIN" if pnl_usd > 0 else "LOSS"
 
-            update_trade(pos["id"], {
-                "outcome":    outcome,
-                "exit_price": round(exit_px, 4),
-                "exit_time":  datetime.now().isoformat()[:16],
-                "pnl_usd":    pnl_usd,
-                "pnl_pct":    pnl_pct,
+            close_result = {
+                "outcome":      outcome,
+                "exit_price":   round(exit_px, 4),
+                "exit_time":    datetime.now().isoformat()[:16],
+                "pnl_usd":      pnl_usd,
+                "pnl_pct":      pnl_pct,
                 "close_reason": reason,
-            })
+            }
+            update_trade(pos["id"], close_result)
+            append_outcome(pos, close_result)
             print(f"  [{reason}] Closed {ticker} {direction} @ ${exit_px:.2f} → {outcome} ${pnl_usd:+.2f}")
             closed += 1
 

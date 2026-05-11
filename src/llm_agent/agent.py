@@ -86,6 +86,7 @@ class QuantAgent:
         regime_label: str = "NEUTRAL",
         regime_summary: str = "",
         additional_context: str = "",
+        recent_outcomes: str = "",
         # backward-compat alias
         sentiment_score: Optional[float] = None,
     ) -> AgentVerdict:
@@ -112,6 +113,7 @@ class QuantAgent:
             session=session,
             position_size_usd=position_size_usd,
             additional_context=additional_context,
+            recent_outcomes=recent_outcomes,
         )
 
         try:

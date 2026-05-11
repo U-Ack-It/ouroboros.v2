@@ -3,6 +3,8 @@ import os
 from src.core.intelligence.sentiment_engine import OuroborosSentiment
 from src.core.intelligence.logger import log_decision
 from src.llm_agent.agent import QuantAgent
+from src.sentiment.credit_signal import get_credit_stress
+from portfolio.trade_memory import get_recent_outcomes
 
 
 class TradeValidator:
@@ -43,6 +45,11 @@ class TradeValidator:
         risk_params = self.policy.get("risk_parameters", {})
         position_size = risk_params.get("max_position_size_usd", 450.0)
 
+        recent_outcomes = get_recent_outcomes(ticker)
+
+        credit_stressed, credit_summary = get_credit_stress()
+        additional_context = credit_summary if credit_stressed else ""
+
         verdict = self.agent.analyze_trade(
             ticker=ticker,
             asset_class=asset_class,
@@ -55,6 +62,8 @@ class TradeValidator:
             current_price=float(price or 0.0),
             session=session,
             position_size_usd=position_size,
+            recent_outcomes=recent_outcomes,
+            additional_context=additional_context,
         )
 
         if verdict.is_blocked():

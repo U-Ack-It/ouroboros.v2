@@ -161,6 +161,7 @@ def build_user_prompt(
     regime_label: str = "NEUTRAL",
     regime_summary: str = "",
     additional_context: str = "",
+    recent_outcomes: str = "",
     # backward-compat
     sentiment_score: float = None,
 ) -> str:
@@ -175,6 +176,8 @@ def build_user_prompt(
         "BEAR":    "Headwind — consider tighter risk or smaller size.",
         "CRISIS":  "CRISIS — extreme volatility; longs blocked upstream.",
     }.get(regime_label, "Unknown")
+
+    outcomes_section = f"\n{recent_outcomes}\n" if recent_outcomes else ""
 
     return f"""TRADE PROPOSAL — Gate 4 Review
 
@@ -192,7 +195,7 @@ Market Regime:
   Label: {regime_label}  (score {regime_score:.2f} — range: CRISIS=-1.0, BEAR=0.0, NEUTRAL=0.5, BULL=1.0)
   {regime_summary if regime_summary else regime_bias}
   Bias: {regime_bias}
-
+{outcomes_section}
 Position:
   Size: ${position_size_usd:.2f} USD
   Stop loss: -1% (${current_price * 0.99:.4f})
