@@ -4,7 +4,7 @@ from src.core.intelligence.sentiment_engine import OuroborosSentiment
 from src.core.intelligence.logger import log_decision
 from src.llm_agent.agent import QuantAgent
 from src.sentiment.credit_signal import get_credit_stress
-from portfolio.trade_memory import get_recent_outcomes
+from portfolio.trade_memory import get_recent_outcomes, get_win_rate
 
 
 class TradeValidator:
@@ -20,6 +20,11 @@ class TradeValidator:
         return True, "Ethical check passed."
 
     def validate_risk(self, ticker, price, size, vol, smc_data=None, session="UNKNOWN"):
+        # Gate 0: Equity universe whitelist
+        asset_map = self.policy.get("neutrality_priority", {}).get("asset_mapping", {})
+        if asset_map and ticker not in asset_map:
+            return False, f"REJECTED: {ticker} not in approved equity universe."
+
         # Gate 1: Ethics
         is_ethic, eth_msg = self.is_ethical(ticker)
         if not is_ethic:
@@ -72,6 +77,12 @@ class TradeValidator:
                 regime.label, verdict.verdict, verdict.reasoning, verdict.confidence
             )
             return False, f"REJECTED (Gate 4): {verdict.reasoning}"
+
+        # Adaptive confidence: downgrade APPROVE → CAUTION if historical win rate is poor
+        win_rate = get_win_rate(ticker)
+        if win_rate is not None and win_rate < 0.35 and not verdict.is_flagged():
+            verdict.verdict = "CAUTION"
+            verdict.risk_flags = list(verdict.risk_flags) + [f"poor_win_rate_{win_rate:.0%}"]
 
         final_status = "CAUTION" if verdict.is_flagged() else "PASS"
         log_decision(

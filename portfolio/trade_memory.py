@@ -100,6 +100,35 @@ def get_recent_outcomes(ticker: str, n: int = 5) -> str:
     return "\n\n".join(parts) if parts else ""
 
 
+def get_win_rate(ticker: str, n: int = 10) -> float | None:
+    """
+    Returns recent win rate (0.0–1.0) or None if fewer than 3 data points.
+    Checks raw recent entries first; falls back to accumulated pattern stats.
+    """
+    if not MEMORY_PATH.exists():
+        return None
+    blocks = _parse_blocks()
+
+    raw = [b for b in blocks if _is_raw(b) and b[0].startswith(f"## {ticker} | ")]
+    recent = raw[-n:]
+    if len(recent) >= 3:
+        wins = sum(1 for b in recent if b[0].split(" | ")[1].strip() == "WIN")
+        return wins / len(recent)
+
+    # Fall back to accumulated pattern stats
+    pattern = next((b for b in blocks if b[0] == f"## [PATTERN] {ticker}"), None)
+    if pattern:
+        for line in pattern:
+            if "**Stored stats**" in line:
+                try:
+                    w = int(line.split("wins=")[1].split(" ")[0])
+                    l = int(line.split("losses=")[1].split(" ")[0])
+                    return w / (w + l) if (w + l) >= 3 else None
+                except Exception:
+                    pass
+    return None
+
+
 def compact_if_needed() -> bool:
     """Trigger compaction when raw entry count exceeds COMPACT_THRESHOLD."""
     if not MEMORY_PATH.exists():
