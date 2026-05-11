@@ -1,0 +1,18 @@
+{
+  "start_date": "2024-06-01",
+  "end_date": "2025-06-01",
+  "interval": "15m",
+  "tickers": ["TLT", "CCJ", "ZIM", "GLD", "BDRY", "VALE"],
+  "starting_capital": 3000,
+  "position_size_usd": 450,
+  "stop_loss_pct": 0.01,
+  "take_profit_pct": 0.02,
+  "max_trades_per_session": 3,
+  "session_filter": true,
+  "sessions": {
+    "london":  {"start_hour": 3,  "end_hour": 5},
+    "ny":      {"start_hour": 8,  "end_hour": 11},
+    "asia":    {"start_hour": 20, "end_hour": 23}
+  },
+  "output_dir": "reports/backtests"
+}

@@ -1,0 +1,17 @@
+{
+  "dry_run": true,
+  "long_only": true,
+  "max_daily_trades": 6,
+  "max_trades_per_ticker_per_day": 1,
+  "stop_loss_pct": 0.01,
+  "take_profit_pct": 0.02,
+  "tp_duration": "GOOD_TILL_CANCEL",
+  "sl_duration": "GOOD_TILL_CANCEL",
+  "min_price_sanity": 0.50,
+  "max_price_sanity": 100000.0,
+  "daily_loss_limit_usd": -150.0,
+  "eod_flatten_hour": 15,
+  "eod_flatten_minute": 55,
+  "orders_log": "logs/orders.json",
+  "_note": "Set dry_run=false only when Schwab tokens are valid and account is funded"
+}

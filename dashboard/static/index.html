@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ouroboros v2 — Risk Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:      #0d1117;
+    --surface: #161b22;
+    --border:  #30363d;
+    --text:    #e6edf3;
+    --muted:   #8b949e;
+    --green:   #3fb950;
+    --red:     #f85149;
+    --yellow:  #d29922;
+    --blue:    #58a6ff;
+    --accent:  #1f6feb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.5px; }
+  header .badge { font-size: 11px; background: var(--accent); border-radius: 4px; padding: 2px 8px; }
+  #status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: auto; }
+  #status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  #as-of { font-size: 11px; color: var(--muted); margin-left: 8px; }
+
+  main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+  section { margin-bottom: 28px; }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+
+  /* Stat cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .card .value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .card .value.green { color: var(--green); }
+  .card .value.red   { color: var(--red); }
+  .card .value.blue  { color: var(--blue); }
+
+  /* Chart */
+  .chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; height: 260px; position: relative; }
+  #eq-chart { width: 100% !important; height: 228px !important; }
+
+  /* Tables */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: auto; max-height: 320px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { position: sticky; top: 0; background: var(--surface); padding: 9px 12px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  tbody td { padding: 8px 12px; font-size: 13px; white-space: nowrap; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 4px; padding: 2px 7px; }
+  .tag.green  { background: rgba(63,185,80,0.15); color: var(--green); }
+  .tag.red    { background: rgba(248,81,73,0.15);  color: var(--red); }
+  .tag.yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .tag.blue   { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .tag.muted  { background: rgba(139,148,158,0.15); color: var(--muted); }
+
+  .empty { color: var(--muted); font-style: italic; padding: 20px 12px; }
+
+  /* Refresh button */
+  #refresh-btn { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 12px; }
+  #refresh-btn:hover { border-color: var(--blue); color: var(--blue); }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Ouroboros v2</h1>
+  <span class="badge">Risk Dashboard</span>
+  <div id="status-dot"></div>
+  <span id="as-of">—</span>
+  <button id="refresh-btn" onclick="refresh()">⟳ Refresh</button>
+</header>
+
+<main>
+
+  <!-- Stats cards -->
+  <section>
+    <h2>Portfolio Overview</h2>
+    <div class="cards" id="cards">
+      <div class="card"><div class="label">Equity</div><div class="value blue" id="c-equity">—</div></div>
+      <div class="card"><div class="label">Net P&L</div><div class="value" id="c-pnl">—</div></div>
+      <div class="card"><div class="label">Today P&L</div><div class="value" id="c-today">—</div></div>
+      <div class="card"><div class="label">Win Rate</div><div class="value" id="c-wr">—</div></div>
+      <div class="card"><div class="label">Trades</div><div class="value" id="c-trades">—</div></div>
+      <div class="card"><div class="label">Open</div><div class="value blue" id="c-open">—</div></div>
+      <div class="card"><div class="label">Sharpe</div><div class="value" id="c-sharpe">—</div></div>
+      <div class="card"><div class="label">Max DD</div><div class="value red" id="c-dd">—</div></div>
+    </div>
+  </section>
+
+  <!-- Equity curve -->
+  <section>
+    <h2>Equity Curve</h2>
+    <div class="chart-wrap">
+      <canvas id="eq-chart"></canvas>
+    </div>
+  </section>
+
+  <div class="two-col">
+
+    <!-- Open positions -->
+    <section>
+      <h2>Open Positions</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Ticker</th><th>Dir</th><th>Qty</th><th>Entry $</th><th>TP $</th><th>SL $</th><th>Session</th><th>Time</th>
+          </tr></thead>
+          <tbody id="pos-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Recent orders -->
+    <section>
+      <h2>Recent Orders</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Time</th><th>Ticker</th><th>Dir</th><th>Status</th><th>Message</th>
+          </tr></thead>
+          <tbody id="ord-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Gate log -->
+  <section>
+    <h2>Gate Log (trading_decisions.log)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Timestamp</th><th>Ticker</th><th>Verdict</th><th>Detail</th>
+        </tr></thead>
+        <tbody id="gate-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script>
+// ---------------------------------------------------------------------------
+// Chart setup
+// ---------------------------------------------------------------------------
+const ctx = document.getElementById('eq-chart').getContext('2d');
+let equityChart = new Chart(ctx, {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'Equity',
+    data: [],
+    borderColor: '#58a6ff',
+    backgroundColor: 'rgba(88,166,255,0.08)',
+    borderWidth: 2,
+    pointRadius: 0,
+    fill: true,
+    tension: 0.3,
+  }]},
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    plugins: { legend: { display: false }, tooltip: {
+      callbacks: { label: ctx => '$' + ctx.parsed.y.toLocaleString('en-US', {minimumFractionDigits:2}) }
+    }},
+    scales: {
+      x: { ticks: { color: '#8b949e', maxTicksLimit: 8, maxRotation: 0 }, grid: { color: '#21262d' } },
+      y: { ticks: { color: '#8b949e', callback: v => '$' + v.toLocaleString() }, grid: { color: '#21262d' } },
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function fmtMoney(v)   { return (v >= 0 ? '+' : '') + '$' + Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function sign(v)       { return v >= 0 ? 'green' : 'red'; }
+function verdictTag(v) {
+  v = (v || '').toUpperCase();
+  if (v.includes('APPRO') || v.includes('WIN'))   return `<span class="tag green">${v}</span>`;
+  if (v.includes('BLOCK') || v.includes('LOSS'))  return `<span class="tag red">${v}</span>`;
+  if (v.includes('DRY')   || v.includes('OPEN'))  return `<span class="tag yellow">${v}</span>`;
+  return `<span class="tag muted">${v}</span>`;
+}
+function dirTag(d) {
+  d = (d || '').toUpperCase();
+  return d === 'LONG'  ? `<span class="tag green">LONG</span>`  :
+         d === 'SHORT' ? `<span class="tag red">SHORT</span>`   :
+                         `<span class="tag muted">${d}</span>`;
+}
+function setText(id, text, cls='') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  if (cls) { el.className = 'value ' + cls; }
+}
+
+// ---------------------------------------------------------------------------
+// Data loaders
+// ---------------------------------------------------------------------------
+async function loadStats() {
+  const s = await fetch('/api/stats').then(r => r.json());
+  setText('c-equity', '$' + s.final_equity.toLocaleString('en-US',{minimumFractionDigits:2}), 'blue');
+  const pnlEl = document.getElementById('c-pnl');
+  pnlEl.textContent = fmtMoney(s.net_pnl);
+  pnlEl.className = 'value ' + sign(s.net_pnl);
+  const todayEl = document.getElementById('c-today');
+  todayEl.textContent = fmtMoney(s.pnl_today);
+  todayEl.className = 'value ' + sign(s.pnl_today);
+  setText('c-wr',     s.win_rate.toFixed(1) + '%',  s.win_rate >= 50 ? 'green' : 'red');
+  setText('c-trades', `${s.wins}W / ${s.losses}L`);
+  setText('c-open',   s.open_positions,   'blue');
+  setText('c-sharpe', s.sharpe.toFixed(2), s.sharpe >= 1 ? 'green' : s.sharpe < 0 ? 'red' : '');
+  setText('c-dd',     s.max_dd_pct.toFixed(2) + '%', 'red');
+  document.getElementById('as-of').textContent = 'as of ' + s.as_of;
+  document.getElementById('status-dot').className = 'live';
+}
+
+async function loadEquity() {
+  const pts = await fetch('/api/equity').then(r => r.json());
+  equityChart.data.labels   = pts.map(p => p.t);
+  equityChart.data.datasets[0].data = pts.map(p => p.v);
+  equityChart.update('none');
+}
+
+async function loadPositions() {
+  const rows = await fetch('/api/positions').then(r => r.json());
+  const body = document.getElementById('pos-body');
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="8" class="empty">No open positions</td></tr>'; return; }
+  body.innerHTML = rows.map(r => `<tr>
+    <td><b>${r.ticker || '—'}</b></td>
+    <td>${dirTag(r.direction)}</td>
+    <td>${r.shares ?? '—'}</td>
+    <td>$${(r.entry_price||0).toFixed(2)}</td>
+    <td>$${(r.take_profit||0).toFixed(2)}</td>
+    <td>$${(r.stop_loss||0).toFixed(2)}</td>
+    <td><span class="tag blue">${r.session||'—'}</span></td>
+    <td>${(r.entry_time||'').slice(0,16)}</td>
+  </tr>`).join('');
+}
+
+async function loadOrders() {
+  const rows = await fetch('/api/orders?n=40').then(r => r.json());
+  const body = document.getElementById('ord-body');
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="empty">No orders logged yet</td></tr>'; return; }
+  body.innerHTML = rows.map(r => {
+    const o = r.order || {};
+    const ts = (r.submitted_at || '').slice(0,16);
+    const ok = r.success;
+    const isDry = (o.dry_run || r.order_id === 'DRY-RUN');
+    const statusTag = isDry
+      ? `<span class="tag yellow">DRY RUN</span>`
+      : ok ? `<span class="tag green">PLACED</span>` : `<span class="tag red">FAILED</span>`;
+    return `<tr>
+      <td>${ts}</td>
+      <td><b>${o.ticker||r.ticker||'—'}</b></td>
+      <td>${dirTag(o.direction)}</td>
+      <td>${statusTag}</td>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;color:var(--muted)">${(r.message||'').slice(0,80)}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadGate() {
+  const rows = await fetch('/api/gate?n=40').then(r => r.json());
+  const body = document.getElementById('gate-body');
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="empty">No gate log entries found</td></tr>'; return; }
+  body.innerHTML = rows.map(r => `<tr>
+    <td style="color:var(--muted)">${r.ts}</td>
+    <td><b>${r.ticker}</b></td>
+    <td>${verdictTag(r.verdict)}</td>
+    <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;color:var(--muted)">${r.detail}</td>
+  </tr>`).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Init & auto-refresh
+// ---------------------------------------------------------------------------
+async function refresh() {
+  document.getElementById('status-dot').className = '';
+  await Promise.all([loadStats(), loadEquity(), loadPositions(), loadOrders(), loadGate()]);
+}
+
+refresh();
+setInterval(refresh, 30_000);  // auto-refresh every 30 s
+</script>
+</body>
+</html>

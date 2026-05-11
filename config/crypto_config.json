@@ -1,0 +1,29 @@
+{
+  "symbols": [
+    {"binance": "BTCUSDT",  "name": "Bitcoin",   "category": "L1"},
+    {"binance": "ETHUSDT",  "name": "Ethereum",  "category": "L1"},
+    {"binance": "SOLUSDT",  "name": "Solana",    "category": "L1"},
+    {"binance": "BNBUSDT",  "name": "BNB",       "category": "L1"},
+    {"binance": "ADAUSDT",  "name": "Cardano",   "category": "L1"},
+    {"binance": "AVAXUSDT", "name": "Avalanche", "category": "L1"},
+    {"binance": "LINKUSDT", "name": "Chainlink", "category": "DeFi"},
+    {"binance": "AAVUSDT",  "name": "Aave",      "category": "DeFi"},
+    {"binance": "UNIUSDT",  "name": "Uniswap",   "category": "DeFi"},
+    {"binance": "DOTUSDT",  "name": "Polkadot",  "category": "L0"}
+  ],
+  "interval": "1h",
+  "min_gap_pct": 0.1,
+  "risk": {
+    "position_size_usd": 150,
+    "stop_loss_pct":   0.02,
+    "take_profit_pct": 0.04,
+    "max_open_positions": 2,
+    "daily_loss_limit_usd": 100
+  },
+  "sessions": {
+    "asia":     {"start_hour": 0,  "end_hour": 7},
+    "europe":   {"start_hour": 8,  "end_hour": 15},
+    "americas": {"start_hour": 16, "end_hour": 23}
+  },
+  "note": "Execution via Binance/Coinbase — not routed through Schwab"
+}

@@ -1,0 +1,177 @@
+{
+  "run_date": "2026-05-11T00:08:37.591435",
+  "full_start": "2024-06-01",
+  "full_end": "2025-06-01",
+  "n_segments": 3,
+  "oos_ratio": 0.25,
+  "tickers": [
+    "TLT",
+    "CCJ",
+    "ZIM",
+    "GLD",
+    "VALE"
+  ],
+  "param_grid": [
+    {
+      "sl_pct": 0.01,
+      "tp_pct": 0.02,
+      "session_filter": true,
+      "label": "1/2 +sess"
+    },
+    {
+      "sl_pct": 0.01,
+      "tp_pct": 0.03,
+      "session_filter": true,
+      "label": "1/3 +sess"
+    },
+    {
+      "sl_pct": 0.015,
+      "tp_pct": 0.03,
+      "session_filter": true,
+      "label": "1.5/3 +sess"
+    },
+    {
+      "sl_pct": 0.02,
+      "tp_pct": 0.04,
+      "session_filter": true,
+      "label": "2/4 +sess"
+    },
+    {
+      "sl_pct": 0.01,
+      "tp_pct": 0.02,
+      "session_filter": false,
+      "label": "1/2 nosess"
+    },
+    {
+      "sl_pct": 0.01,
+      "tp_pct": 0.03,
+      "session_filter": false,
+      "label": "1/3 nosess"
+    }
+  ],
+  "segments": [
+    {
+      "idx": 1,
+      "is_start": "2024-06-01",
+      "is_end": "2024-08-31",
+      "oos_start": "2024-08-31",
+      "oos_end": "2024-09-30",
+      "best_params": {
+        "sl_pct": 0.01,
+        "tp_pct": 0.02,
+        "session_filter": false,
+        "label": "1/2 nosess"
+      },
+      "best_label": "1/2 nosess",
+      "is_stats": {
+        "trades": 302,
+        "wins": 210,
+        "win_rate": 69.54,
+        "net_pnl": 1476.0,
+        "sharpe": 12.4661,
+        "sortino": 31.2375,
+        "pf": 4.5652,
+        "max_dd_pct": 1.3966
+      },
+      "oos_stats": {
+        "trades": 85,
+        "wins": 64,
+        "win_rate": 75.29,
+        "net_pnl": 481.5,
+        "sharpe": 15.353,
+        "sortino": 40.2036,
+        "pf": 6.0952,
+        "max_dd_pct": 2.8302
+      },
+      "efficiency": 1.232
+    },
+    {
+      "idx": 2,
+      "is_start": "2024-08-31",
+      "is_end": "2024-11-30",
+      "oos_start": "2024-11-30",
+      "oos_end": "2024-12-30",
+      "best_params": {
+        "sl_pct": 0.01,
+        "tp_pct": 0.02,
+        "session_filter": false,
+        "label": "1/2 nosess"
+      },
+      "best_label": "1/2 nosess",
+      "is_stats": {
+        "trades": 301,
+        "wins": 211,
+        "win_rate": 70.1,
+        "net_pnl": 1494.0,
+        "sharpe": 12.7272,
+        "sortino": 32.0209,
+        "pf": 4.6889,
+        "max_dd_pct": 3.6697
+      },
+      "oos_stats": {
+        "trades": 71,
+        "wins": 55,
+        "win_rate": 77.46,
+        "net_pnl": 423.0,
+        "sharpe": 16.6489,
+        "sortino": 44.273,
+        "pf": 6.875,
+        "max_dd_pct": 1.0989
+      },
+      "efficiency": 1.308
+    },
+    {
+      "idx": 3,
+      "is_start": "2024-11-30",
+      "is_end": "2025-03-01",
+      "oos_start": "2025-03-01",
+      "oos_end": "2025-03-31",
+      "best_params": {
+        "sl_pct": 0.01,
+        "tp_pct": 0.02,
+        "session_filter": false,
+        "label": "1/2 nosess"
+      },
+      "best_label": "1/2 nosess",
+      "is_stats": {
+        "trades": 255,
+        "wins": 198,
+        "win_rate": 77.65,
+        "net_pnl": 1525.5,
+        "sharpe": 16.8522,
+        "sortino": 44.6367,
+        "pf": 6.9474,
+        "max_dd_pct": 0.8403
+      },
+      "oos_stats": {
+        "trades": 79,
+        "wins": 54,
+        "win_rate": 68.35,
+        "net_pnl": 373.5,
+        "sharpe": 11.8775,
+        "sortino": 29.6479,
+        "pf": 4.32,
+        "max_dd_pct": 2.8846
+      },
+      "efficiency": 0.705
+    }
+  ],
+  "recommended_params": {
+    "sl_pct": 0.01,
+    "tp_pct": 0.02,
+    "session_filter": false,
+    "label": "1/2 nosess"
+  },
+  "oos_combined": {
+    "trades": 235,
+    "wins": 173,
+    "win_rate": 73.62,
+    "net_pnl": 1278.0,
+    "sharpe": 14.4795,
+    "sortino": 37.3498,
+    "pf": 5.5806,
+    "max_dd_pct": 2.8302
+  },
+  "stability_pct": 100.0,
+  "is_overfit": false
+}
