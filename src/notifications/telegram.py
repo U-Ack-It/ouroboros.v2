@@ -128,6 +128,26 @@ class TelegramNotifier:
             position_usd, order_id, success, dry_run, message,
         ))
 
+    def send_trade_closed(
+        self,
+        ticker:      str,
+        direction:   str,
+        quantity:    int,
+        entry_price: float,
+        exit_price:  float,
+        tp:          float,
+        sl:          float,
+        pnl_usd:     float,
+        pnl_pct:     float,
+        outcome:     str,
+        dry_run:     bool,
+    ) -> None:
+        from src.notifications.messages import fmt_trade_closed
+        self.send(fmt_trade_closed(
+            ticker, direction, quantity, entry_price, exit_price,
+            tp, sl, pnl_usd, pnl_pct, outcome, dry_run,
+        ))
+
     def send_gate_block(self, ticker: str, gate: str, reason: str) -> None:
         from src.notifications.messages import fmt_gate_block
         self.send(fmt_gate_block(ticker, gate, reason))

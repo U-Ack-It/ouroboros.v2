@@ -17,7 +17,7 @@ import os
 from datetime import datetime, date, timezone
 from typing import Optional
 
-from src.core.broker.schwab_client import SchwabClient
+from src.core.broker.alpaca_client import AlpacaClient as SchwabClient
 from src.core.broker.order import BracketOrder, OrderResult
 from src.notifications.telegram import TelegramNotifier
 from portfolio.ledger import load_trades
@@ -39,14 +39,15 @@ class TradeExecutor:
         self._client   = SchwabClient()
         self._notifier = TelegramNotifier()
         self._daily_counts: dict[str, dict[str, int]] = {}  # date → {ticker: count, _total: count}
+        self._seed_daily_counts()
 
         # Attempt broker connection at startup (non-fatal)
         ok, msg = self._client.connect()
         if ok:
             ok2, msg2 = self._client.get_account_hash()
-            print(f"[Executor] Schwab: {msg} | {msg2}")
+            print(f"[Executor] Alpaca: {msg} | {msg2}")
         else:
-            print(f"[Executor] Schwab offline ({msg}) — dry_run forced ON")
+            print(f"[Executor] Alpaca offline ({msg}) — dry_run forced ON")
             self._cfg["dry_run"] = True
 
     # ------------------------------------------------------------------
@@ -60,6 +61,7 @@ class TradeExecutor:
         fvg_type:    str,        # BULL_FVG | BEAR_FVG
         price:       float,
         session:     str,
+        confidence:  float = 1.0,
     ) -> OrderResult:
         """
         Full execution pipeline for one signal.
@@ -83,10 +85,18 @@ class TradeExecutor:
         if ok and live_price > 0:
             price = live_price
 
-        # ---- Position sizing ------------------------------------------
-        position_usd = float(
-            self._risk.get("risk_parameters", {}).get("max_position_size_usd", 450.0)
-        )
+        # ---- Position sizing (regime × conviction) --------------------
+        position_usd = self._regime_position_usd()
+        # Scale by Gate 4 confidence: ≥0.85→100%, 0.70→80%, 0.55→60%, <0.55→40%
+        if confidence >= 0.85:
+            conviction = 1.0
+        elif confidence >= 0.70:
+            conviction = 0.80
+        elif confidence >= 0.55:
+            conviction = 0.60
+        else:
+            conviction = 0.40
+        position_usd = round(position_usd * conviction, 2)
         quantity = max(1, int(position_usd / price))
 
         # ---- Build order record ----------------------------------------
@@ -145,8 +155,10 @@ class TradeExecutor:
 
         # ---- Persist ---------------------------------------------------
         self._log_order(result)
+        # Count attempted API submissions (success or not) to prevent retry loops
+        # on hard-to-borrow rejections or other broker-side failures.
+        self._increment_count(ticker)
         if result.success:
-            self._increment_count(ticker)
             self._append_to_ledger(bracket, result)
 
         # ---- Notify ----------------------------------------------------
@@ -167,6 +179,32 @@ class TradeExecutor:
         return result
 
     # ------------------------------------------------------------------
+    # Position sizing
+    # ------------------------------------------------------------------
+
+    def _regime_position_usd(self) -> float:
+        """
+        Return the regime-adaptive position size.
+        Reads logs/regime_snapshot.json (written by MarketRegimeDetector every 15 min).
+        Falls back to max_position_size_usd if the snapshot is missing or stale (>1 hr).
+        """
+        base  = float(self._risk.get("risk_parameters", {}).get("max_position_size_usd", 450.0))
+        sizes = self._risk.get("regime_position_sizing",
+                               {"BULL": 450, "NEUTRAL": 350, "BEAR": 250, "CRISIS": 0})
+        try:
+            from pathlib import Path
+            from datetime import datetime as _dt
+            snap = Path("logs/regime_snapshot.json")
+            if snap.exists():
+                data    = json.loads(snap.read_text())
+                fetched = _dt.fromisoformat(data["fetched_at"])
+                if (_dt.now() - fetched).total_seconds() < 3600:
+                    return float(sizes.get(data.get("label", "NEUTRAL"), base))
+        except Exception:
+            pass
+        return base
+
+    # ------------------------------------------------------------------
     # Pre-flight guard
     # ------------------------------------------------------------------
 
@@ -180,6 +218,9 @@ class TradeExecutor:
         # Direction guard
         if long_only and direction == "SHORT":
             return f"SHORT blocked (long_only=true) — BEAR_FVG signals are logged but not executed"
+        no_short = self._risk.get("no_short_list", [])
+        if direction == "SHORT" and ticker in no_short:
+            return f"SHORT blocked — {ticker} is non-shortable on Alpaca"
 
         # Price sanity
         lo = self._cfg.get("min_price_sanity", 0.50)
@@ -205,11 +246,39 @@ class TradeExecutor:
         if counts.get(ticker, 0) >= max_per_ticker:
             return f"{ticker} already traded today ({max_per_ticker}/day limit)"
 
+        # Open exposure cap
+        max_exposure = float(self._cfg.get("max_open_exposure_usd", 900.0))
+        try:
+            positions = self._client.api.list_positions()
+            open_usd  = sum(abs(float(p.market_value)) for p in positions)
+            if open_usd >= max_exposure:
+                return (f"Open exposure ${open_usd:.0f} ≥ limit ${max_exposure:.0f} "
+                        f"— wait for positions to close")
+        except Exception:
+            pass  # if Alpaca unreachable, allow trade rather than block
+
         return None
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _seed_daily_counts(self):
+        """Restore today's trade counts from ledger so restarts don't reset limits."""
+        today = date.today().isoformat()
+        try:
+            trades = load_trades()
+            for t in trades:
+                if t.get("entry_time", "")[:10] == today:
+                    ticker = t.get("ticker", "")
+                    if not ticker:
+                        continue
+                    if today not in self._daily_counts:
+                        self._daily_counts[today] = {}
+                    self._daily_counts[today][ticker] = self._daily_counts[today].get(ticker, 0) + 1
+                    self._daily_counts[today]["_total"] = self._daily_counts[today].get("_total", 0) + 1
+        except Exception:
+            pass
 
     def _get_today_pnl(self, today: str) -> float:
         try:

@@ -27,8 +27,7 @@ ASSET UNIVERSE:
 - GLD: Physical gold (inflation hedge)
 - BDRY: Dry bulk shipping logistics (supply chain)
 - VALE: Iron ore/mining (Brazil — commodity play)
-- XAUUSD: Spot gold (global safe haven)
-- XAGUSD: Spot silver (industrial + safe haven)
+- SLV: iShares Silver Trust (industrial + safe haven)
 - D05.SI: DBS Singapore Bank (Asia-Pacific financials)
 - 8035.T: Tokyo Electron (Japan tech/semiconductor)
 
@@ -179,6 +178,36 @@ def build_user_prompt(
 
     outcomes_section = f"\n{recent_outcomes}\n" if recent_outcomes else ""
 
+    try:
+        from src.sentiment.macro_quadrant import get_gate4_prior
+        macro_prior = get_gate4_prior()
+    except Exception:
+        macro_prior = ""
+
+    macro_section = f"\nMacro Framework (Gave/IdL):\n  {macro_prior}\n" if macro_prior else ""
+
+    # Live news via Perplexity — injected between macro and position
+    news_section = ""
+    try:
+        import os, requests as _req
+        _pplx_key = os.getenv("PERPLEXITY_API_KEY", "")
+        if _pplx_key:
+            _r = _req.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={"Authorization": f"Bearer {_pplx_key}"},
+                json={"model": "sonar",
+                      "messages": [{"role": "user",
+                                    "content": f"{ticker} {asset_class} news catalyst today — 2 sentences max"}],
+                      "max_tokens": 120},
+                timeout=8,
+            )
+            _r.raise_for_status()
+            _news = _r.json()["choices"][0]["message"]["content"].strip()
+            if _news:
+                news_section = f"\nLive News ({ticker}):\n  {_news}\n"
+    except Exception:
+        pass
+
     return f"""TRADE PROPOSAL — Gate 4 Review
 
 Ticker: {ticker}
@@ -195,7 +224,7 @@ Market Regime:
   Label: {regime_label}  (score {regime_score:.2f} — range: CRISIS=-1.0, BEAR=0.0, NEUTRAL=0.5, BULL=1.0)
   {regime_summary if regime_summary else regime_bias}
   Bias: {regime_bias}
-{outcomes_section}
+{macro_section}{news_section}{outcomes_section}
 Position:
   Size: ${position_size_usd:.2f} USD
   Stop loss: -1% (${current_price * 0.99:.4f})

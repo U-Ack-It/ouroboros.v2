@@ -16,8 +16,10 @@ scan share one regime read.  Refresh happens automatically on next fetch
 after TTL expires.
 """
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 import yfinance as yf
@@ -63,6 +65,7 @@ class MarketRegimeDetector:
             return self._cache
         snap = self._fetch()
         self._cache = snap
+        self._write_snapshot(snap)
         return snap
 
     def is_safe(self, ticker: str) -> tuple[bool, float]:
@@ -114,6 +117,19 @@ class MarketRegimeDetector:
         if df.empty:
             raise ValueError("VIX data empty")
         return float(df["Close"].iloc[-1])
+
+    def _write_snapshot(self, snap: "RegimeSnapshot") -> None:
+        out = Path("logs/regime_snapshot.json")
+        out.parent.mkdir(exist_ok=True)
+        try:
+            out.write_text(json.dumps({
+                "label":      snap.label,
+                "score":      snap.score,
+                "vix":        snap.vix,
+                "fetched_at": snap.fetched_at.isoformat(),
+            }))
+        except Exception:
+            pass
 
     def _get_spy_ma(self) -> tuple[float, float]:
         df = yf.Ticker("SPY").history(period="300d", interval="1d")

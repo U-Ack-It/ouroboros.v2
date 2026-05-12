@@ -58,7 +58,7 @@ class QuantAgent:
     reducing cost on subsequent calls within the same session window.
     """
 
-    MODEL = "claude-opus-4-7"
+    MODEL = "claude-sonnet-4-20250514"
     MAX_TOKENS = 256  # Verdict JSON is small — keep tight
 
     def __init__(self):

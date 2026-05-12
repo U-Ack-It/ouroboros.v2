@@ -3,6 +3,7 @@ import json
 import sys
 import os
 from datetime import datetime
+from pathlib import Path
 
 sys.path.append(os.getcwd())
 from src.core.gatekeeper.validator import TradeValidator
@@ -10,6 +11,8 @@ from src.core.scanner.async_scanner import scan_all_sync
 from src.core.execution.executor import TradeExecutor
 from src.notifications.telegram import TelegramNotifier
 from portfolio.position_manager import PositionManager
+from portfolio.weekly_digest import send_weekly_digest
+from portfolio.ledger import load_trades
 
 
 def get_session_name(hour: int) -> str:
@@ -27,6 +30,44 @@ def is_market_active():
     if (3 <= hour <= 5) or (8 <= hour <= 11) or (20 <= hour <= 23):
         return True, "ACTIVE SESSION (High Volume)"
     return False, "ZOMBIE HOURS (SMC Inactive - Sleeping)"
+
+
+def _print_session_summary(session_label: str, start_time: datetime) -> None:
+    SEP = "─" * 60
+    try:
+        trades = [
+            t for t in load_trades()
+            if t.get("outcome") in ("WIN", "LOSS")
+            and t.get("exit_time", "") >= start_time.isoformat()[:16]
+        ]
+    except Exception:
+        return
+
+    if not trades:
+        print(f"\n{SEP}\n  [{session_label}] Session ended — no closed trades.\n{SEP}\n")
+        return
+
+    wins   = sum(1 for t in trades if t.get("outcome") == "WIN")
+    losses = len(trades) - wins
+    net    = sum(t.get("pnl_usd", 0.0) for t in trades)
+
+    by_ticker: dict[str, float] = {}
+    for t in trades:
+        k = t.get("ticker", "?")
+        by_ticker[k] = by_ticker.get(k, 0.0) + t.get("pnl_usd", 0.0)
+
+    best  = max(by_ticker.items(), key=lambda x: x[1])
+    worst = min(by_ticker.items(), key=lambda x: x[1])
+
+    detail = ""
+    if len(by_ticker) > 1:
+        detail = f"  best: {best[0]} ${best[1]:+.2f}  |  worst: {worst[0]} ${worst[1]:+.2f}"
+    elif best:
+        detail = f"  {best[0]} ${best[1]:+.2f}"
+
+    print(f"\n{SEP}")
+    print(f"  [{session_label}] CLOSED  {wins}W / {losses}L  net ${net:+.2f}{detail}")
+    print(f"{SEP}\n")
 
 
 def run_pulse():
@@ -48,6 +89,11 @@ def run_pulse():
         pass
     notifier.send_startup(_watchlist, _dry_run)
 
+    _weekly_sent_on: str  = ""
+    _prev_active:    bool = False
+    _session_start:  datetime = datetime.now()
+    _session_label:  str  = ""
+
     with open("config/risk_policy.json", "r") as f:
         config = json.load(f)
     asset_map = config.get("neutrality_priority", {}).get("asset_mapping", {})
@@ -63,11 +109,28 @@ def run_pulse():
         current_time = datetime.now().strftime("%H:%M:%S")
         session = get_session_name(datetime.now().hour)
 
+        # Detect session boundary transitions
+        if _prev_active and not active:
+            _print_session_summary(_session_label, _session_start)
+        if not _prev_active and active:
+            _session_start = datetime.now()
+            _session_label = session
+        _prev_active = active
+
         if not active:
             print(f"💤 [{current_time}] {session_msg}")
             pm.eod_check()
             time.sleep(900)
             continue
+
+        # Sunday weekly digest — send once on first active tick of the day
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if datetime.now().weekday() == 6 and _weekly_sent_on != today_str:
+            _weekly_sent_on = today_str
+            try:
+                send_weekly_digest()
+            except Exception as exc:
+                print(f"   ⚠️  weekly digest failed: {exc}")
 
         print(f"🔥 [{current_time}] {session_msg}")
 
@@ -105,7 +168,7 @@ def run_pulse():
             fvg_tag = f"[{r.fvg_type}]" if r.has_fvg else "[NO FVG]"
             print(f"{icon} [{r.asset_class: <18}] {r.ticker: <8} {fvg_tag: <12} | {msg}")
 
-            if status and r.has_fvg:
+            if status and r.has_fvg and not Path("logs/paused").exists():
                 # Parse verdict details from the message for the signal alert
                 _conf  = 0.0
                 _rsn   = msg
@@ -142,6 +205,7 @@ def run_pulse():
                     fvg_type=r.fvg_type,
                     price=r.price,
                     session=session,
+                    confidence=_conf,
                 )
                 print(f"   {result.icon} {result.message}")
 

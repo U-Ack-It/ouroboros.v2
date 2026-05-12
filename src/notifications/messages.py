@@ -93,6 +93,33 @@ def fmt_gate_block(ticker: str, gate: str, reason: str) -> str:
 # Preflight block (execution-level)
 # ---------------------------------------------------------------------------
 
+def fmt_trade_closed(
+    ticker:      str,
+    direction:   str,
+    quantity:    int,
+    entry_price: float,
+    exit_price:  float,
+    tp:          float,
+    sl:          float,
+    pnl_usd:     float,
+    pnl_pct:     float,
+    outcome:     str,
+    dry_run:     bool,
+) -> str:
+    outcome_icon = "✅ WIN" if outcome == "WIN" else ("❌ LOSS" if outcome == "LOSS" else "⏹ FLAT")
+    dir_icon     = "🟢" if direction == "LONG" else "🔴"
+    mode         = "🧪 " if dry_run else ""
+    pnl_icon     = "📈" if pnl_usd >= 0 else "📉"
+
+    return (
+        f"{mode}{outcome_icon} <b>{_esc(ticker)} CLOSED</b> {dir_icon}\n"
+        f"Entry : <code>${entry_price:,.4f}</code> → Exit: <code>${exit_price:,.4f}</code>\n"
+        f"🎯 TP: <code>${tp:,.4f}</code>  |  🛑 SL: <code>${sl:,.4f}</code>\n"
+        f"{pnl_icon} P&L: <code>${pnl_usd:+,.2f}</code> ({pnl_pct:+.2f}%)\n"
+        f"{quantity}x @ ${entry_price:,.2f}"
+    )
+
+
 def fmt_preflight_block(ticker: str, reason: str) -> str:
     return (
         f"⏹ <b>{_esc(ticker)}</b> — execution skipped\n"

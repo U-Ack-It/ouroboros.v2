@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), ".."
 
 from portfolio.ledger import load_trades, load_open_positions, update_trade
 from portfolio.trade_memory import append_outcome
-from src.core.broker.schwab_client import SchwabClient
+from src.core.broker.alpaca_client import AlpacaClient as SchwabClient
 from src.notifications.telegram import TelegramNotifier
 
 import yfinance as yf
@@ -83,23 +83,18 @@ class PositionManager:
                 update_trade(pos["id"], result)
                 append_outcome(pos, result)
                 closed += 1
-                self._notifier.send_execution(
+                self._notifier.send_trade_closed(
                     ticker      = pos.get("ticker", "?"),
                     direction   = pos.get("direction", "LONG"),
                     quantity    = pos.get("shares", 0),
-                    entry_price = pos.get("entry_price", 0),
-                    tp          = pos.get("take_profit", 0),
-                    sl          = pos.get("stop_loss", 0),
-                    position_usd= pos.get("position_size_usd", 0),
-                    order_id    = pos.get("order_id", "—"),
-                    success     = True,
+                    entry_price = float(pos.get("entry_price", 0)),
+                    exit_price  = float(result.get("exit_price", 0)),
+                    tp          = float(pos.get("take_profit", 0)),
+                    sl          = float(pos.get("stop_loss", 0)),
+                    pnl_usd     = float(result.get("pnl_usd", 0)),
+                    pnl_pct     = float(result.get("pnl_pct", 0)),
+                    outcome     = result.get("outcome", "FLAT"),
                     dry_run     = dry_run,
-                    message     = (
-                        f"[CLOSED] {result['outcome']} "
-                        f"exit=${result.get('exit_price',0):.2f} "
-                        f"pnl=${result.get('pnl_usd',0):+.2f} "
-                        f"({result.get('pnl_pct',0):+.2f}%)"
-                    ),
                 )
 
         return closed
@@ -119,12 +114,20 @@ class PositionManager:
         pos_usd    = float(pos.get("position_size_usd", shares * entry_px))
 
         try:
-            df = yf.Ticker(ticker).history(start=entry_time, interval="1h")
+            t = yf.Ticker(ticker)
+            df = t.history(start=entry_time, interval="1h")
+            if df.empty or len(df) < 2:
+                df = t.history(period="5d", interval="1h")
             if df.empty or len(df) < 2:
                 return None
             idx = df.index.tz_convert(None) if df.index.tz else df.index
             df.index = idx
-            bars = df.iloc[1:]  # skip the entry bar itself
+            # keep only bars strictly after entry to avoid stale pre-entry data
+            entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00")).replace(tzinfo=None)
+            df = df[df.index > entry_dt]
+            if df.empty:
+                return None
+            bars = df  # all post-entry bars
         except Exception:
             return None
 

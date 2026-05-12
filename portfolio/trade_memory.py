@@ -29,11 +29,13 @@ def append_outcome(pos: dict, result: dict) -> None:
     pnl_usd   = result.get("pnl_usd", 0.0)
     pnl_pct   = result.get("pnl_pct", 0.0)
     session   = pos.get("session", "?")
+    fvg_type  = pos.get("fvg_type", "?")
     reasoning = _get_gate_reasoning(ticker)
 
     entry = (
         f"\n## {ticker} | {outcome} | {datetime.now().strftime('%Y-%m-%d')}\n"
         f"- **Session**: {session}"
+        f" | **FVG**: {fvg_type}"
         f" | **Entry**: ${pos.get('entry_price', 0):.4f}"
         f" | **Exit**: ${result.get('exit_price', 0):.4f}\n"
         f"- **P&L**: ${pnl_usd:+.2f} ({pnl_pct:+.2f}%)\n"
@@ -127,6 +129,26 @@ def get_win_rate(ticker: str, n: int = 10) -> float | None:
                 except Exception:
                     pass
     return None
+
+
+def get_consecutive_losses(ticker: str) -> int:
+    """
+    Returns the current streak of consecutive LOSS outcomes for ticker.
+    Resets to 0 on any WIN. Returns 0 if no data.
+    """
+    if not MEMORY_PATH.exists():
+        return 0
+    blocks = _parse_blocks()
+    raw = [b for b in blocks if _is_raw(b) and b[0].startswith(f"## {ticker} | ")]
+    streak = 0
+    for block in reversed(raw):
+        bits    = block[0].split(" | ")
+        outcome = bits[1].strip() if len(bits) > 1 else "?"
+        if outcome == "LOSS":
+            streak += 1
+        else:
+            break
+    return streak
 
 
 def compact_if_needed() -> bool:

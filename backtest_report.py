@@ -13,6 +13,7 @@ import os
 import sys
 import argparse
 import math
+from portfolio.analytics import sharpe_ratio, max_drawdown, profit_factor
 from datetime import datetime
 
 
@@ -36,46 +37,6 @@ def find_latest_report(out_dir: str = "reports/backtests") -> str:
         raise FileNotFoundError(f"No backtest files in {out_dir}")
     return max(files, key=os.path.getmtime)
 
-
-# ---------------------------------------------------------------------------
-# Metrics
-# ---------------------------------------------------------------------------
-
-def sharpe_ratio(returns: list[float], risk_free: float = 0.0) -> float:
-    """Annualised Sharpe ratio from a list of per-trade returns (%)."""
-    if len(returns) < 2:
-        return 0.0
-    n = len(returns)
-    mean = sum(returns) / n
-    variance = sum((r - mean) ** 2 for r in returns) / (n - 1)
-    std = math.sqrt(variance) if variance > 0 else 0.0
-    if std == 0:
-        return 0.0
-    # Annualise assuming ~252 trading days, ~3 trades/day avg
-    ann_factor = math.sqrt(252 * 3)
-    return round((mean - risk_free) / std * ann_factor, 4)
-
-
-def max_drawdown(equity_curve: list[float]) -> tuple[float, float]:
-    """Returns (max_drawdown_usd, max_drawdown_pct) from an equity curve."""
-    peak = equity_curve[0]
-    max_dd_usd = 0.0
-    max_dd_pct = 0.0
-    for v in equity_curve:
-        if v > peak:
-            peak = v
-        dd = peak - v
-        dd_pct = dd / peak * 100 if peak else 0
-        if dd > max_dd_usd:
-            max_dd_usd = dd
-            max_dd_pct = dd_pct
-    return round(max_dd_usd, 2), round(max_dd_pct, 4)
-
-
-def profit_factor(wins_pnl: list[float], losses_pnl: list[float]) -> float:
-    gross_profit = sum(wins_pnl)
-    gross_loss = abs(sum(losses_pnl))
-    return round(gross_profit / gross_loss, 4) if gross_loss else float("inf")
 
 
 # ---------------------------------------------------------------------------

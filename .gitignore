@@ -28,3 +28,8 @@ logs/*.log
 
 # Local config
 config/local.py
+
+# Runtime data
+data/
+logs/
+memory/

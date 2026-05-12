@@ -39,9 +39,17 @@ app = FastAPI(title="Ouroboros v2 Dashboard", docs_url=None, redoc_url=None)
 _STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 
-ORDERS_LOG  = Path("logs/orders.json")
-GATE_LOG    = Path("logs/trading_decisions.log")
-STARTING_CAPITAL = 10_000.0
+ORDERS_LOG   = Path("logs/orders.json")
+GATE_LOG     = Path("logs/trading_decisions.log")
+RISK_POLICY  = Path("config/risk_policy.json")
+
+def _starting_capital() -> float:
+    try:
+        return float(json.loads(RISK_POLICY.read_text()).get("starting_capital", 3000.0))
+    except Exception:
+        return 3000.0
+
+STARTING_CAPITAL = _starting_capital()
 
 
 # ---------------------------------------------------------------------------

@@ -12,8 +12,7 @@
       "BDRY": "Global-Logistics",
       "8035.T": "Tokyo-Tech",
       "VALE": "Brazil-Mining",
-      "XAUUSD": "Global-Gold",
-      "XAGUSD": "Global-Silver"
+      "SLV": "Global-Silver"
     }
   },
   "boycott_list": [
@@ -21,9 +20,20 @@
     "ESLT",
     "MCD"
   ],
+  "no_short_list": [
+    "BDRY",
+    "8035.T",
+    "D05.SI"
+  ],
   "risk_parameters": {
     "max_position_size_usd": 450,
     "sentiment_threshold": -0.2,
     "session_filter_active": true
+  },
+  "regime_position_sizing": {
+    "BULL":    450,
+    "NEUTRAL": 350,
+    "BEAR":    250,
+    "CRISIS":  0
   }
 }
