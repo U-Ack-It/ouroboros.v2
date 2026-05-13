@@ -43,7 +43,7 @@ except ImportError:
 from supervisor.escalation_queue import resolve
 from src.notifications.telegram import TelegramNotifier
 
-MODEL                 = "claude-opus-4-7"
+MODEL                 = "claude-sonnet-4-20250514"
 AUTO_APPLY_THRESHOLD  = 0.85
 PROJECT_ROOT          = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 INCIDENT_LEDGER_PATH  = os.path.expanduser(
