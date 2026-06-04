@@ -33,3 +33,4 @@ config/local.py
 data/
 logs/
 memory/
+*.bak
