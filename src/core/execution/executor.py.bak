@@ -4,7 +4,7 @@ Trade Executor — orchestrates the path from approved signal to filled order.
 Flow:
   1. Pre-flight checks  (price sanity, daily trade limit, long-only guard)
   2. Position sizing    (USD budget → share quantity)
-  3. Build bracket      (TRIGGER → OCO via AlpacaClient)
+  3. Build bracket      (TRIGGER → OCO via SchwabClient)
   4. Submit or dry-run  (respects execution_config.json dry_run flag)
   5. Persist result     (orders.json log + portfolio ledger)
 
@@ -17,7 +17,7 @@ import os
 from datetime import datetime, date, timezone
 from typing import Optional
 
-from src.core.broker.alpaca_client import AlpacaClient
+from src.core.broker.alpaca_client import AlpacaClient as SchwabClient
 from src.core.broker.order import BracketOrder, OrderResult
 from src.notifications.telegram import TelegramNotifier
 from portfolio.ledger import load_trades
@@ -36,7 +36,7 @@ class TradeExecutor:
         self._cfg  = self._load(config_path)
         self._risk = self._load(risk_path)
 
-        self._client   = AlpacaClient()
+        self._client   = SchwabClient()
         self._notifier = TelegramNotifier()
         self._daily_counts: dict[str, dict[str, int]] = {}  # date → {ticker: count, _total: count}
         self._seed_daily_counts()
@@ -115,18 +115,6 @@ class TradeExecutor:
             dry_run=dry_run,
         )
 
-        # ---- Dedup: reject if we already hold this ticker ----------------
-        if not dry_run and self._client.has_open_position(ticker):
-            result = OrderResult(
-                order=bracket,
-                success=False,
-                order_id=None,
-                http_status=None,
-                message=f"BLOCKED {ticker}: already have an open position — dedup prevented duplicate entry.",
-                raw_response=None,
-            )
-            self._append_to_ledger(bracket, result)
-            return result
         # ---- Submit or dry-run ----------------------------------------
         if dry_run:
             result = OrderResult(
@@ -141,7 +129,7 @@ class TradeExecutor:
                 raw_response=None,
             )
         else:
-            payload = AlpacaClient.build_bracket_payload(
+            payload = SchwabClient.build_bracket_payload(
                 ticker=ticker,
                 direction=direction,
                 quantity=quantity,
@@ -151,18 +139,6 @@ class TradeExecutor:
                 tp_duration=self._cfg.get("tp_duration", "GOOD_TILL_CANCEL"),
                 sl_duration=self._cfg.get("sl_duration", "GOOD_TILL_CANCEL"),
             )
-            # Crypto shorts return None — skip gracefully
-            if payload is None:
-                result = OrderResult(
-                    order=bracket,
-                    success=False,
-                    order_id=None,
-                    http_status=None,
-                    message=f"SKIPPED {ticker}: crypto shorting not supported on Alpaca",
-                    raw_response=None,
-                )
-                self._append_to_ledger(bracket, result)
-                return result
             ok, order_id, http_status, raw = self._client.place_order(payload)
             result = OrderResult(
                 order=bracket,

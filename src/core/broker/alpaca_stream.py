@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent.parent / ".env")
 
 ALPACA_KEY    = os.getenv("ALPACA_API_KEY", "")
-ALPACA_SECRET = os.getenv("ALPACA_SECRET_KEY", "")
+ALPACA_SECRET = os.getenv("ALPACA_API_SECRET", "")  # matches AlpacaClient
 PAPER         = os.getenv("ALPACA_BASE_URL", "").find("paper") != -1 or True
 WS_URL        = (
     "wss://paper-api.alpaca.markets/stream"

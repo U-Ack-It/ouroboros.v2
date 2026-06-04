@@ -181,3 +181,63 @@ def api_gate(n: int = Query(50, ge=1, le=500)):
 def dashboard():
     html = (_STATIC / "index.html").read_text()
     return HTMLResponse(content=html)
+
+
+@app.get("/api/regime")
+def api_regime():
+    """Current market regime from snapshot."""
+    regime_path = Path("logs/regime_snapshot.json")
+    if not regime_path.exists():
+        return {"label": "UNKNOWN", "score": 0, "vix": 0}
+    try:
+        data = json.loads(regime_path.read_text())
+        # Calculate age in minutes
+        fetched = datetime.fromisoformat(data.get("fetched_at", ""))
+        age_min = (datetime.now() - fetched).total_seconds() / 60
+        data["age_minutes"] = round(age_min, 1)
+        data["stale"] = age_min > 90
+        return data
+    except Exception:
+        return {"label": "ERROR", "score": 0, "vix": 0}
+
+
+@app.get("/api/scan")
+def api_last_scan():
+    """Parse last scan cycle from heartbeat log."""
+    log_path = Path("logs/heartbeat.log")
+    if not log_path.exists():
+        return {"session": "unknown", "results": []}
+    try:
+        lines = log_path.read_text().splitlines()
+        # Find last scan block (starts with ═══)
+        scan_start = -1
+        scan_end = -1
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].startswith("──────") and scan_end == -1:
+                scan_end = i
+            if "═══" in lines[i] and scan_end != -1:
+                scan_start = i
+                break
+        if scan_start == -1:
+            return {"session": "unknown", "results": []}
+        block = lines[scan_start:scan_end + 1]
+        session = block[0] if block else ""
+        regime_line = block[1] if len(block) > 1 else ""
+        scan_line = block[2] if len(block) > 2 else ""
+        results = []
+        for line in block[4:]:
+            line = line.strip()
+            if not line or line.startswith("──"):
+                continue
+            if "others: no FVG" in line:
+                results.append({"type": "summary", "text": line.strip("── ")})
+                continue
+            results.append({"type": "detail", "text": line})
+        return {
+            "session": session,
+            "regime": regime_line,
+            "scan_summary": scan_line,
+            "results": results,
+        }
+    except Exception as e:
+        return {"error": str(e)}

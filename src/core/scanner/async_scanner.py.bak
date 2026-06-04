@@ -42,12 +42,11 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=20, thread_name_prefix="ouroboros_sca
 def _scan_one(ticker: str, asset_class: str) -> ScanResult:
     t0 = time.monotonic()
     try:
-        yf_sym = ticker.replace("/", "-")  # BTC/USD -> BTC-USD for yfinance
-        fvg = find_imbalances(yf_sym)
+        fvg = find_imbalances(ticker)
 
         # Fetch last price alongside the scan (reuse the same yf.Ticker object)
         try:
-            fast = yf.Ticker(yf_sym).fast_info
+            fast = yf.Ticker(ticker).fast_info
             price = float(getattr(fast, "last_price", 0.0) or 0.0)
         except Exception:
             price = 0.0

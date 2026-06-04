@@ -13,7 +13,6 @@ from src.notifications.telegram import TelegramNotifier
 from portfolio.position_manager import PositionManager
 from portfolio.weekly_digest import send_weekly_digest
 from portfolio.ledger import load_trades
-import heartbeat_format as hf
 
 
 def get_session_name(hour: int) -> str:
@@ -119,7 +118,7 @@ def run_pulse():
         _prev_active = active
 
         if not active:
-            hf.zombie_line(current_time, hf.get_next_session(datetime.now().hour))
+            print(f"💤 [{current_time}] {session_msg}")
             pm.eod_check()
             time.sleep(900)
             continue
@@ -133,7 +132,7 @@ def run_pulse():
             except Exception as exc:
                 print(f"   ⚠️  weekly digest failed: {exc}")
 
-        hf.session_header(current_time, session)
+        print(f"🔥 [{current_time}] {session_msg}")
 
         # Sync positions + EOD check at start of each active-session tick
         closed_n = pm.sync_positions()
@@ -145,21 +144,11 @@ def run_pulse():
         scan_results = scan_all_sync(asset_map)
         elapsed = time.monotonic() - t0
         fvg_count = sum(1 for r in scan_results if r.has_fvg)
-        # Load regime for display
-        _regime_data = {}
-        try:
-            import json as _rj
-            with open("logs/regime_snapshot.json") as _rf:
-                _regime_data = _rj.load(_rf)
-        except Exception:
-            pass
-        hf.regime_line(_regime_data)
-        hf.scan_summary(len(scan_results), elapsed, fvg_count)
-        _no_fvg_count = 0
+        print(f"   ⚡ Scanned {len(scan_results)} symbols in {elapsed:.2f}s | {fvg_count} FVG(s) detected")
 
         for r in scan_results:
             if not r.ok:
-                hf.error_line(r.ticker, r.error)
+                print(f"⚠️  [{r.asset_class: <18}] {r.ticker: <8} [SCAN ERR]   | {r.error}")
                 continue
 
             smc_data = {
@@ -175,16 +164,9 @@ def run_pulse():
                 session=session,
             )
 
-            if not status and not r.has_fvg:
-                _no_fvg_count += 1
-                continue  # Skip printing — counted in summary
-            elif not status and r.has_fvg:
-                # Has FVG but rejected — show actual reason from validator
-                print(f"  ⚠️  {r.ticker:<8} {r.fvg_type:<10} | {msg}")
-                continue
-            # Approved
-            icon = "✅"
+            icon = "✅" if status else "🚫"
             fvg_tag = f"[{r.fvg_type}]" if r.has_fvg else "[NO FVG]"
+            print(f"{icon} [{r.asset_class: <18}] {r.ticker: <8} {fvg_tag: <12} | {msg}")
 
             if status and r.has_fvg and not Path("logs/paused").exists():
                 # Parse verdict details from the message for the signal alert
@@ -225,10 +207,9 @@ def run_pulse():
                     session=session,
                     confidence=_conf,
                 )
-                hf.execution_result(r.ticker, result.icon, result.message)
+                print(f"   {result.icon} {result.message}")
 
-        hf.no_fvg_summary(_no_fvg_count)
-        hf.scan_footer()
+        print("\n" + "-" * 60)
         time.sleep(300)
 
 

@@ -57,7 +57,7 @@ CRYPTO_SYSTEM_PROMPT = """You are the reasoning layer of Ouroboros v2, an algori
 TRADING PHILOSOPHY:
 - Strategy: Smart Money Concepts — Fair Value Gaps (FVG), liquidity sweeps, order block taps
 - Market: Crypto — 24/7, no session restrictions (Asia/Europe/Americas windows used for context)
-- Execution: Signal-only (routed through Alpaca); tracked in portfolio ledger
+- Execution: Signal-only (not routed through Schwab); tracked in portfolio ledger
 
 RISK PARAMETERS (CRYPTO — higher volatility):
 - Max position size: $150 USD per trade

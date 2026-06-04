@@ -127,6 +127,9 @@ class MarketRegimeDetector:
                 "score":      snap.score,
                 "vix":        snap.vix,
                 "fetched_at": snap.fetched_at.isoformat(),
+                "spy_price":  snap.spy_price,
+                "spy_ma200":  snap.spy_ma200,
+                "above_ma200": snap.above_ma200,
             }))
         except Exception:
             pass

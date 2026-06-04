@@ -1,7 +1,7 @@
 """
 Alpaca Execution Client
 
-Alpaca execution client. Paper and live trading via REST API.
+Drop-in replacement for SchwabClient. Same public interface.
 Supports paper trading (ALPACA_BASE_URL=https://paper-api.alpaca.markets)
 and live trading (ALPACA_BASE_URL=https://api.alpaca.markets).
 
@@ -125,26 +125,6 @@ class AlpacaClient:
     # Order builder
     # ------------------------------------------------------------------
 
-    def get_open_positions(self) -> list:
-        """Get all open positions from Alpaca."""
-        try:
-            resp = self._session.get(f"{self._base}/v2/positions", timeout=10)
-            if resp.status_code == 200:
-                return resp.json()
-            return []
-        except Exception:
-            return []
-
-    def has_open_position(self, ticker: str) -> bool:
-        """Check if we already have an open position for this ticker."""
-        positions = self.get_open_positions()
-        # Normalize: BDRY, BTC/USD -> BTCUSD
-        normalized = ticker.replace("/", "")
-        for pos in positions:
-            if pos.get("symbol", "").upper() == normalized.upper():
-                return True
-        return False
-
     @staticmethod
     def build_bracket_payload(
         ticker:      str,
@@ -169,7 +149,7 @@ class AlpacaClient:
             tp_price = round(entry_price * (1 + tp_pct), 2)
             sl_price = round(entry_price * (1 - sl_pct), 2)
         else:
-            side     = "sell_short"
+            side     = "sell"
             tp_price = round(entry_price * (1 - tp_pct), 2)
             sl_price = round(entry_price * (1 + sl_pct), 2)
 

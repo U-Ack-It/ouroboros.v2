@@ -24,7 +24,7 @@ from supervisor.l2_ouroboros import run_scan
 from supervisor.l3_fixer import run_l3
 
 POLL_INTERVAL_SEC    = 900   # 15 min
-L3_AUTO_SEVERITIES   = set()   # L3 triggers automatically for these
+L3_AUTO_SEVERITIES   = {"HIGH"}   # L3 triggers automatically for these
 
 
 def run():

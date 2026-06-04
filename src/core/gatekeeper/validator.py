@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import os
 from src.core.intelligence.sentiment_engine import OuroborosSentiment
@@ -50,10 +51,56 @@ class TradeValidator:
         fvg_size  = float(smc_data.get("size", 0.0))
         fvg_price = float(smc_data.get("price", price or 1.0))
         fvg_pct   = fvg_size / fvg_price if fvg_price else 0.0
-        min_fvg   = float(self._cfg.get("min_fvg_pct", 0.001))
+        # Gate: per-ticker daily trade limit
+        max_per_ticker = int(self._cfg.get("max_trades_per_ticker_per_day", 1))
+        try:
+            import json as _j
+            with open("logs/orders.json") as _f:
+                _orders = _j.load(_f)
+            _today = datetime.now().strftime("%Y-%m-%d")
+            _today_ticker = [o for o in _orders
+                           if o.get("order", {}).get("ticker") == ticker
+                           and o.get("submitted_at", "").startswith(_today)
+                           and o.get("success")]
+            if len(_today_ticker) >= max_per_ticker:
+                log_decision(ticker, "BLOCK", f"Daily per-ticker limit reached ({len(_today_ticker)}/{max_per_ticker})", regime.label)
+                return False, f"REJECTED: {ticker} already traded {len(_today_ticker)}x today (limit {max_per_ticker})."
+        except Exception as e:
+            log_decision(ticker, "BLOCK", f"Cannot verify trade limit: {e}", "UNKNOWN")
+            return False, f"REJECTED: Cannot verify daily trade limit — refusing to trade."
+
+        # Gate: session-asset filter
+
+        # US equities only trade during NY Power Hour (8-11)
+
+        # Crypto trades 24/7
+
+        is_crypto = "/" in ticker
+
+        if not is_crypto:
+
+            current_hour = datetime.now().hour
+
+            if not (8 <= current_hour <= 11):
+
+                log_decision(ticker, "BLOCK", f"US equity blocked outside NY hours (current hour: {current_hour})", regime.label)
+
+                return False, f"REJECTED: {ticker} is a US equity — only trades during NY Power Hour (8-11 ET)."
+
+        # Regime-adaptive FVG threshold:
+        # BULL/low-vol markets compress FVGs — use a lower threshold
+        # BEAR/high-vol markets expand FVGs — use a higher threshold
+        base_fvg = float(self._cfg.get("min_fvg_pct", 0.001))
+        fvg_multiplier = {
+            "BULL":    0.5,   # 0.05% — accept smaller FVGs in calm markets
+            "NEUTRAL": 1.0,   # 0.10% — standard threshold
+            "BEAR":    1.5,   # 0.15% — demand larger FVGs in volatile markets
+            "CRISIS":  2.0,   # 0.20% — only strong setups in crisis
+        }.get(regime.label, 1.0)
+        min_fvg = base_fvg * fvg_multiplier
         if fvg_pct < min_fvg:
-            log_decision(ticker, "BLOCK", f"FVG too small ({fvg_pct:.4%} < {min_fvg:.4%})", regime.label)
-            return False, f"REJECTED: FVG {fvg_pct:.4%} below minimum {min_fvg:.4%} — noise threshold."
+            log_decision(ticker, "BLOCK", f"FVG too small ({fvg_pct:.4%} < {min_fvg:.4%} [{regime.label} regime])", regime.label)
+            return False, f"REJECTED: FVG {fvg_pct:.4%} below minimum {min_fvg:.4%} — noise threshold ({regime.label} regime)."
 
         # Gate 3.5b: Consecutive loss circuit breaker
         halt_n = int(self._cfg.get("consecutive_loss_halt", 3))

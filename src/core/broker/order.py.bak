@@ -1,5 +1,5 @@
 """
-Order data models for Alpaca execution.
+Order data models for Schwab execution.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -34,7 +34,7 @@ class OrderResult:
     """Result returned after attempting to place an order."""
     order: BracketOrder
     success:    bool
-    order_id:   Optional[str]  # Alpaca order ID from response
+    order_id:   Optional[str]  # Schwab order ID from response header
     http_status: Optional[int]
     message:    str
     raw_response: Optional[dict]

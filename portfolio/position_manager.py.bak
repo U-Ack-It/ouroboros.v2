@@ -3,7 +3,7 @@ Ouroboros v2 — Position Manager
 
 Responsibilities:
   1. Sync open positions — check whether bracket TP/SL has been hit and
-     update the ledger accordingly.  Live mode polls Alpaca order status;
+     update the ledger accordingly.  Live mode polls Schwab order status;
      dry-run mode simulates using yfinance OHLC bars since entry.
 
   2. Daily loss limit — if today's realised P&L falls below the configured
@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), ".."
 
 from portfolio.ledger import load_trades, load_open_positions, update_trade
 from portfolio.trade_memory import append_outcome
-from src.core.broker.alpaca_client import AlpacaClient
+from src.core.broker.alpaca_client import AlpacaClient as SchwabClient
 from src.notifications.telegram import TelegramNotifier
 
 import yfinance as yf
@@ -48,7 +48,7 @@ class PositionManager:
     ):
         self._cfg      = self._load_json(config_path)
         self._risk     = self._load_json(risk_path)
-        self._client   = AlpacaClient()
+        self._client   = SchwabClient()
         self._notifier = TelegramNotifier()
         self._eod_flattened_on: Optional[str] = None  # date string — prevent double-flatten
 
@@ -173,7 +173,7 @@ class PositionManager:
 
     def _broker_close(self, pos: dict) -> Optional[dict]:
         """
-        For live positions: query Alpaca order status by order_id.
+        For live positions: query Schwab order status by order_id.
         Returns update dict if the order is fully filled, else None.
         """
         order_id = pos.get("order_id")
@@ -259,7 +259,7 @@ class PositionManager:
     def flatten_all(self, reason: str = "EOD") -> int:
         """
         Close every OPEN position immediately.
-        Live: submits a market order via Alpaca.
+        Live: submits a market order via Schwab.
         Dry-run: marks closed at current yfinance price.
         Returns number of positions closed.
         """
@@ -283,7 +283,7 @@ class PositionManager:
             if not dry_run:
                 # Submit market close order
                 side = "SELL" if direction == "LONG" else "BUY_TO_COVER"
-                payload = AlpacaClient.build_market_payload(ticker, side, shares)
+                payload = SchwabClient.build_market_payload(ticker, side, shares)
                 ok, oid, _, _ = self._client.place_order(payload)
                 if not ok:
                     print(f"  ⚠️  {ticker}: flatten order failed")
