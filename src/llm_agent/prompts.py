@@ -208,6 +208,16 @@ def build_user_prompt(
     except Exception:
         pass
 
+    # Multi-TF trend — opt-in via OUROBOROS_TREND=1 (Alpaca data, zero Anthropic cost)
+    import os as _os
+    trend_section = ""
+    if _os.getenv("OUROBOROS_TREND", "0") == "1":
+        try:
+            from src.trend.multi_tf import build_trend_context
+            trend_section = f"\n{build_trend_context(ticker).to_prompt_block()}\n"
+        except Exception:
+            trend_section = ""
+
     return f"""TRADE PROPOSAL — Gate 4 Review
 
 Ticker: {ticker}
@@ -224,7 +234,7 @@ Market Regime:
   Label: {regime_label}  (score {regime_score:.2f} — range: CRISIS=-1.0, BEAR=0.0, NEUTRAL=0.5, BULL=1.0)
   {regime_summary if regime_summary else regime_bias}
   Bias: {regime_bias}
-{macro_section}{news_section}{outcomes_section}
+{macro_section}{news_section}{trend_section}{outcomes_section}
 Position:
   Size: ${position_size_usd:.2f} USD
   Stop loss: -1% (${current_price * 0.99:.4f})
