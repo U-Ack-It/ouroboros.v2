@@ -77,8 +77,13 @@ except ImportError:
             error: Optional[str]
 
 # --- Constants -----------------------------------------------------------
-_LOOKBACK_MINUTES_15M = 15 * 60      # 15 hours of 15m bars = 60 candles
-_LOOKBACK_MINUTES_5M  = 5 * 60       # 5  hours of 5m  bars = 60 candles
+# Widened to 5 days so we always land on the last trading session even on
+# weekends/US holidays. On regular trading days this still captures a fresh
+# rolling window; detect_fvg only reads the tail.
+_LOOKBACK_MINUTES_15M = 5 * 24 * 60   # 5 days of 15m bars (~130 bars/session)
+_LOOKBACK_MINUTES_5M  = 5 * 24 * 60   # 5 days of 5m  bars (~390 bars/session)
+# 30-minute end-buffer keeps us out of the IEX free-tier SIP restriction window.
+_END_LAG_MINUTES      = 30
 _MIN_BARS_FOR_FVG     = 3
 _MIN_BARS_FOR_TREND   = 20           # trend_engine needs enough history
 
@@ -165,9 +170,10 @@ def scan_symbol(
 
     try:
         now = now or datetime.datetime.now(datetime.timezone.utc)
-        end_15m = now
+        cutoff = now - datetime.timedelta(minutes=_END_LAG_MINUTES)
+        end_15m = cutoff
         start_15m = end_15m - datetime.timedelta(minutes=lookback_15m_minutes)
-        end_5m = now
+        end_5m = cutoff
         start_5m = end_5m - datetime.timedelta(minutes=lookback_5m_minutes)
 
         # Fetch both timeframes

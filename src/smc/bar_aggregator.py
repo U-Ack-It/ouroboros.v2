@@ -112,6 +112,7 @@ def _build_alpaca_request(
     start: datetime.datetime,
     end: datetime.datetime,
     limit: Optional[int],
+    feed: str = "iex",
 ) -> Any:
     """
     Build a ``StockBarsRequest`` when the alpaca SDK is available,
@@ -128,6 +129,7 @@ def _build_alpaca_request(
 
     # Map common shorthand strings to Alpaca TimeFrame objects
     _TF_MAP: dict[str, Any] = {
+        # Alpaca canonical
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
         "5Min": TimeFrame(5, TimeFrameUnit.Minute),
         "15Min": TimeFrame(15, TimeFrameUnit.Minute),
@@ -137,13 +139,21 @@ def _build_alpaca_request(
         "1Day": TimeFrame(1, TimeFrameUnit.Day),
         "1Week": TimeFrame(1, TimeFrameUnit.Week),
         "1Month": TimeFrame(1, TimeFrameUnit.Month),
+        # SMC / TradingView short form (used by scanner)
+        "1m":  TimeFrame(1, TimeFrameUnit.Minute),
+        "5m":  TimeFrame(5, TimeFrameUnit.Minute),
+        "15m": TimeFrame(15, TimeFrameUnit.Minute),
+        "30m": TimeFrame(30, TimeFrameUnit.Minute),
+        "1h":  TimeFrame(1, TimeFrameUnit.Hour),
+        "4h":  TimeFrame(4, TimeFrameUnit.Hour),
+        "1d":  TimeFrame(1, TimeFrameUnit.Day),
+        "1w":  TimeFrame(1, TimeFrameUnit.Week),
     }
-
     tf_obj = _TF_MAP.get(timeframe)
     if tf_obj is None:
         raise ValueError(
-            f"Unknown timeframe '{timeframe}'. "
-            f"Supported values: {sorted(_TF_MAP.keys())}"
+            f"Unknown timeframe {timeframe!r}. "
+            f"Supported: {sorted(_TF_MAP.keys())}"
         )
 
     kwargs: dict[str, Any] = dict(
@@ -155,6 +165,7 @@ def _build_alpaca_request(
     if limit is not None:
         kwargs["limit"] = limit
 
+    kwargs["feed"] = feed
     return StockBarsRequest(**kwargs)
 
 
@@ -277,13 +288,11 @@ def get_bars(
             ) from exc
         client = StockHistoricalDataClient(api_key or None, secret_key or None)
 
-    # Fixture clients implement get_stock_bars() and don't need a request object.
-    # Short-circuit here so _build_alpaca_request is never called for tests.
-    if client is not None and not isinstance(client, type(None)):
-        request = None
-        response = client.get_stock_bars(request)
+    # FixtureBarClient ignores the request object; real Alpaca client needs one.
+    if isinstance(client, FixtureBarClient):
+        response = client.get_stock_bars(None)
     else:
-        request = _build_alpaca_request(symbol, timeframe, start, end, limit)
+        request = _build_alpaca_request(symbol, timeframe, start, end, limit, feed=feed)
         try:
             response = client.get_stock_bars(request)
         except Exception as exc:
@@ -293,8 +302,15 @@ def get_bars(
     tz_fallback = datetime.timezone.utc
     bars: List[Bar] = []
 
+    raw_iter: Sequence[Any] = []
     try:
-        raw_iter: Sequence[Any] = list(response)
+        data_attr = getattr(response, "data", None)
+        if isinstance(data_attr, dict):
+            raw_iter = list(data_attr.get(symbol, []))
+        elif data_attr is not None:
+            raw_iter = list(data_attr)
+        else:
+            raw_iter = list(response)
     except Exception:
         raw_iter = []
 
