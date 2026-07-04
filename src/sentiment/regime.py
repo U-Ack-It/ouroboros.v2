@@ -18,7 +18,7 @@ after TTL expires.
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -61,7 +61,7 @@ class MarketRegimeDetector:
         self._cache: Optional[RegimeSnapshot] = None
 
     def detect(self) -> RegimeSnapshot:
-        if self._cache and (datetime.now() - self._cache.fetched_at) < CACHE_TTL:
+        if self._cache and (datetime.now(timezone.utc) - self._cache.fetched_at) < CACHE_TTL:
             return self._cache
         snap = self._fetch()
         self._cache = snap
@@ -109,7 +109,7 @@ class MarketRegimeDetector:
             above_ma200=above,
             label=label,
             score=score,
-            fetched_at=datetime.now(),
+            fetched_at=datetime.now(timezone.utc),
         )
 
     def _get_vix(self) -> float:

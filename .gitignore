@@ -34,3 +34,5 @@ data/
 logs/
 memory/
 *.bak
+patch_*.py
+*.bak

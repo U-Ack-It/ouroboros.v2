@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/..")
 import json
 import subprocess
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Process check
 result = subprocess.run(
@@ -53,7 +53,7 @@ except Exception:
 regime_path = Path("logs/regime_snapshot.json")
 if regime_path.exists():
     r = json.loads(regime_path.read_text())
-    age = (datetime.now() - datetime.fromisoformat(r["fetched_at"])).total_seconds() / 60
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(r["fetched_at"])).total_seconds() / 60
     stale = "⚠️ STALE" if age > 90 else ""
     print(f"  📈 Regime: {r['label']} | VIX={r.get('vix',0):.1f} | SPY=${r.get('spy_price',0):.2f} | {int(age)}m ago {stale}")
 
