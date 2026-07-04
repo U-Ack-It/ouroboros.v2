@@ -61,6 +61,8 @@ class FVGSignal:
     entry_price: float
     timestamp:  datetime.datetime
     bar_indices: tuple[int, int, int]  # (i-1, i, i+1)
+    gap_high: float = 0.0
+    gap_low: float = 0.0
     reject_reason: str = ""
 
 
@@ -68,14 +70,26 @@ class FVGSignal:
 class FVGResult:
     """Raw detection output; FVGSignal is the wired integration form."""
     signal:   FVGSignal | None
-    rejected: bool
+    rejected: bool = False
     reason:   str = ""
+    all_candidates: list = None
+
+    def __post_init__(self):
+        if self.all_candidates is None:
+            self.all_candidates = []
 
 
 @dataclass
 class FVGBoundaries:
     gap_top:    float
     gap_bottom: float
+    entry_price: float = 0.0   # optional signal entry override
+
+    @property
+    def gap_high(self) -> float: return self.gap_top
+
+    @property
+    def gap_low(self) -> float: return self.gap_bottom
 
 
 @dataclass

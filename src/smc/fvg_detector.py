@@ -35,10 +35,10 @@ class Regime(str, Enum):
 
 # Regime-adaptive minimum gap thresholds (as decimal fractions, not percent)
 REGIME_THRESHOLDS: dict[Regime, float] = {
-    Regime.BULL:    0.0005,   # 0.05%
-    Regime.NEUTRAL: 0.0010,   # 0.10%
-    Regime.BEAR:    0.0015,   # 0.15%
-    Regime.CRISIS:  0.0015,   # treat CRISIS same as BEAR
+    FVGRegime.BULL:    0.0005,   # 0.05%
+    FVGRegime.NEUTRAL: 0.0010,   # 0.10%
+    FVGRegime.BEAR:    0.0015,   # 0.15%
+    FVGRegime.CRISIS:  0.0015,   # treat CRISIS same as BEAR
 }
 
 # ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ def _scan_all_fvgs(
             if pct >= threshold:
                 accepted.append(FVGSignal(
                     ticker=ticker,
-                    direction=FVGDirection.BULLISH,
+                    direction=FVGDirection.BULL,
                     gap_pct=pct,
                     entry_price=mid,
                     gap_high=gap_hi,
@@ -104,7 +104,7 @@ def _scan_all_fvgs(
                 ))
             else:
                 rejected.append((
-                    FVGDirection.BULLISH,
+                    FVGDirection.BULL,
                     pct,
                     (
                         f"Bullish FVG at bar {i} rejected: "
@@ -123,7 +123,7 @@ def _scan_all_fvgs(
             if pct >= threshold:
                 accepted.append(FVGSignal(
                     ticker=ticker,
-                    direction=FVGDirection.BEARISH,
+                    direction=FVGDirection.BEAR,
                     gap_pct=pct,
                     entry_price=mid,
                     gap_high=gap_hi,
@@ -133,7 +133,7 @@ def _scan_all_fvgs(
                 ))
             else:
                 rejected.append((
-                    FVGDirection.BEARISH,
+                    FVGDirection.BEAR,
                     pct,
                     (
                         f"Bearish FVG at bar {i} rejected: "
@@ -152,7 +152,7 @@ def _scan_all_fvgs(
 
 def detect_fvg(
     series: BarSeries,
-    regime: Regime = Regime.NEUTRAL,
+    regime: Regime = FVGRegime.NEUTRAL,
     *,
     ticker: Optional[str] = None,
 ) -> FVGResult:
@@ -173,9 +173,9 @@ def detect_fvg(
     Returns
     -------
     FVGResult
-        ``result.accepted`` is ``True`` and ``result.signal`` contains the
+        ``result.all_candidates`` is ``True`` and ``result.signal`` contains the
         most-recent valid ``FVGSignal`` when a gap was found.  Otherwise
-        ``result.signal`` is ``None`` and ``result.rejection_reason``
+        ``result.signal`` is ``None`` and ``result.reason``
         explains the outcome.
     """
     sym = ticker or series.symbol
@@ -185,7 +185,7 @@ def detect_fvg(
     if len(bars) < 3:
         return FVGResult(
             signal=None,
-            rejection_reason=(
+            reason=(
                 f"Insufficient bars for FVG scan: need ≥ 3, got {len(bars)}"
             ),
         )
@@ -196,7 +196,7 @@ def detect_fvg(
         best = accepted[0]  # most-recent
         return FVGResult(
             signal=best,
-            rejection_reason=None,
+            reason="",
             all_candidates=accepted,
         )
 
@@ -213,11 +213,11 @@ def detect_fvg(
             f"(regime={regime.value}, threshold={threshold:.4%})."
         )
 
-    return FVGResult(signal=None, rejection_reason=reason, all_candidates=[])
+    return FVGResult(signal=None, reason=reason, all_candidates=[])
 
 def detect_fvg_all(
     series: BarSeries,
-    regime: Regime = Regime.NEUTRAL,
+    regime: Regime = FVGRegime.NEUTRAL,
     *,
     ticker: Optional[str] = None,
 ) -> List[FVGSignal]:
@@ -276,10 +276,10 @@ if __name__ == "__main__":
     ]
     bullish_series = BarSeries(symbol="TEST", timeframe="5Min", bars=bullish_bars)
 
-    r1 = detect_fvg(bullish_series, Regime.BULL)
-    assert r1.accepted, f"Expected bullish FVG to be accepted; got: {r1.rejection_reason}"
+    r1 = detect_fvg(bullish_series, FVGRegime.BULL)
+    assert r1.all_candidates, f"Expected bullish FVG to be accepted; got: {r1.reason}"
     assert r1.signal is not None
-    assert r1.signal.direction == FVGDirection.BULLISH
+    assert r1.signal.direction == FVGDirection.BULL
     gap_pct_val = _gap_pct(100.0, 100.2)
     assert abs(r1.signal.gap_pct - gap_pct_val) < 1e-10, (
         f"gap_pct mismatch: {r1.signal.gap_pct} vs {gap_pct_val}"
@@ -298,10 +298,10 @@ if __name__ == "__main__":
     ]
     bearish_series = BarSeries(symbol="TEST", timeframe="5Min", bars=bearish_bars)
 
-    r2 = detect_fvg(bearish_series, Regime.BULL)
-    assert r2.accepted, f"Expected bearish FVG to be accepted; got: {r2.rejection_reason}"
+    r2 = detect_fvg(bearish_series, FVGRegime.BULL)
+    assert r2.all_candidates, f"Expected bearish FVG to be accepted; got: {r2.reason}"
     assert r2.signal is not None
-    assert r2.signal.direction == FVGDirection.BEARISH
+    assert r2.signal.direction == FVGDirection.BEAR
     assert r2.signal.bar_indices == (0, 1, 2)
     print(f"[PASS] Bearish FVG detected: {r2.signal.direction}, "
           f"gap={r2.signal.gap_pct:.4%}, entry={r2.signal.entry_price:.4f}")
@@ -315,21 +315,21 @@ if __name__ == "__main__":
     ]
     tiny_series = BarSeries(symbol="TEST", timeframe="5Min", bars=tiny_bars)
 
-    r3 = detect_fvg(tiny_series, Regime.NEUTRAL)  # threshold=0.10%
-    assert not r3.accepted, "Expected tiny gap to be rejected under NEUTRAL regime"
-    assert r3.rejection_reason is not None
-    print(f"[PASS] Tiny gap rejected (NEUTRAL): {r3.rejection_reason}")
+    r3 = detect_fvg(tiny_series, FVGRegime.NEUTRAL)  # threshold=0.10%
+    assert not r3.all_candidates, "Expected tiny gap to be rejected under NEUTRAL regime"
+    assert r3.reason is not None
+    print(f"[PASS] Tiny gap rejected (NEUTRAL): {r3.reason}")
 
     # --- Case 4: Same tiny gap passes under BULL regime (0.05%) ----------
-    r4 = detect_fvg(tiny_series, Regime.BULL)    # threshold=0.05%
+    r4 = detect_fvg(tiny_series, FVGRegime.BULL)    # threshold=0.05%
     # gap_pct ≈ 0.05/100.025 ≈ 0.04998%  → still below 0.05% → should reject
     # (borderline – let's compute precisely)
     exact_pct = _gap_pct(100.0, 100.05)
-    if exact_pct >= REGIME_THRESHOLDS[Regime.BULL]:
-        assert r4.accepted, "Expected gap to pass under BULL"
+    if exact_pct >= REGIME_THRESHOLDS[FVGRegime.BULL]:
+        assert r4.all_candidates, "Expected gap to pass under BULL"
         print(f"[PASS] Borderline gap accepted under BULL: {exact_pct:.5%}")
     else:
-        assert not r4.accepted, "Expected gap to be rejected (below BULL threshold too)"
+        assert not r4.all_candidates, "Expected gap to be rejected (below BULL threshold too)"
         print(f"[PASS] Borderline gap correctly rejected under BULL: {exact_pct:.5%}")
 
     # --- Case 5: Gap that passes BULL but not NEUTRAL --------------------
@@ -341,20 +341,20 @@ if __name__ == "__main__":
     ]
     mid_series = BarSeries(symbol="TEST", timeframe="5Min", bars=mid_bars)
 
-    r5_bull    = detect_fvg(mid_series, Regime.BULL)
-    r5_neutral = detect_fvg(mid_series, Regime.NEUTRAL)
-    assert r5_bull.accepted,    "Expected gap to pass BULL threshold"
-    assert not r5_neutral.accepted, "Expected gap to fail NEUTRAL threshold"
-    print(f"[PASS] Gap passes BULL ({REGIME_THRESHOLDS[Regime.BULL]:.4%}) "
-          f"but fails NEUTRAL ({REGIME_THRESHOLDS[Regime.NEUTRAL]:.4%}): "
+    r5_bull    = detect_fvg(mid_series, FVGRegime.BULL)
+    r5_neutral = detect_fvg(mid_series, FVGRegime.NEUTRAL)
+    assert r5_bull.all_candidates,    "Expected gap to pass BULL threshold"
+    assert not r5_neutral.all_candidates, "Expected gap to fail NEUTRAL threshold"
+    print(f"[PASS] Gap passes BULL ({REGIME_THRESHOLDS[FVGRegime.BULL]:.4%}) "
+          f"but fails NEUTRAL ({REGIME_THRESHOLDS[FVGRegime.NEUTRAL]:.4%}): "
           f"gap={r5_bull.signal.gap_pct:.5%}")
 
     # --- Case 6: Insufficient bars ---------------------------------------
     short_series = BarSeries(symbol="TEST", timeframe="5Min", bars=bullish_bars[:2])
-    r6 = detect_fvg(short_series, Regime.BULL)
-    assert not r6.accepted
-    assert "Insufficient bars" in (r6.rejection_reason or "")
-    print(f"[PASS] Short series rejected: {r6.rejection_reason}")
+    r6 = detect_fvg(short_series, FVGRegime.BULL)
+    assert not r6.all_candidates
+    assert "Insufficient bars" in (r6.reason or "")
+    print(f"[PASS] Short series rejected: {r6.reason}")
 
     # --- Case 7: detect_fvg_all returns multiple signals -----------------
     multi_bars = [
@@ -365,7 +365,7 @@ if __name__ == "__main__":
         _bar(20, 101.5, 102.5, 101.4, 102.0),   # i+1 for second FVG
     ]
     multi_series = BarSeries(symbol="MULTI", timeframe="5Min", bars=multi_bars)
-    all_signals = detect_fvg_all(multi_series, Regime.BULL)
+    all_signals = detect_fvg_all(multi_series, FVGRegime.BULL)
     print(f"[INFO] detect_fvg_all found {len(all_signals)} signal(s) in multi-bar fixture")
     for sig in all_signals:
         print(f"       {sig.direction.value} gap={sig.gap_pct:.4%} "
@@ -373,14 +373,14 @@ if __name__ == "__main__":
 
     # --- Case 8: Empty BarSeries -----------------------------------------
     empty_series = BarSeries(symbol="EMPTY", timeframe="5Min", bars=[])
-    r8 = detect_fvg(empty_series, Regime.BULL)
-    assert not r8.accepted
-    assert r8.rejection_reason is not None
-    print(f"[PASS] Empty series rejected: {r8.rejection_reason}")
+    r8 = detect_fvg(empty_series, FVGRegime.BULL)
+    assert not r8.all_candidates
+    assert r8.reason is not None
+    print(f"[PASS] Empty series rejected: {r8.reason}")
 
     # --- Case 9: Ticker override -----------------------------------------
-    r9 = detect_fvg(bullish_series, Regime.BULL, ticker="OVERRIDE")
-    assert r9.accepted
+    r9 = detect_fvg(bullish_series, FVGRegime.BULL, ticker="OVERRIDE")
+    assert r9.all_candidates
     assert r9.signal is not None and r9.signal.ticker == "OVERRIDE"
     print(f"[PASS] Ticker override works: signal.ticker='{r9.signal.ticker}'")
 
