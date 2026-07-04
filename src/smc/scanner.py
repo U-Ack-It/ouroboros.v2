@@ -88,12 +88,35 @@ _MIN_BARS_FOR_FVG     = 3
 _MIN_BARS_FOR_TREND   = 20           # trend_engine needs enough history
 
 
+_REGIME_DETECTOR = None  # lazy singleton, one per process
+
+
 def _resolve_regime() -> str:
-    """Macro regime for Gate 2. Reads OUROBOROS_REGIME env var; defaults NEUTRAL.
-    Wire this to your real VIX/SPY snapshot later; kept env-driven so heartbeat
-    can inject the current regime without re-reading the market on every scan.
+    """Macro regime for Gate 2.
+
+    Resolution order:
+      1. OUROBOROS_REGIME env var  (manual override for backtests)
+      2. MarketRegimeDetector.detect().label  (live VIX/SPY, TTL-cached 15 min)
+      3. "NEUTRAL"  (safe default)
+
+    Never raises. Detector failure falls back silently to env → NEUTRAL.
+    Heartbeat depends on this never crashing.
     """
-    return os.environ.get("OUROBOROS_REGIME", "NEUTRAL").upper()
+    env_override = os.environ.get("OUROBOROS_REGIME", "").upper()
+    if env_override in {"BULL", "NEUTRAL", "BEAR", "CRISIS"}:
+        return env_override
+
+    global _REGIME_DETECTOR
+    try:
+        if _REGIME_DETECTOR is None:
+            try:
+                from src.sentiment.regime import MarketRegimeDetector
+            except ImportError:
+                from sentiment.regime import MarketRegimeDetector
+            _REGIME_DETECTOR = MarketRegimeDetector()
+        return _REGIME_DETECTOR.detect().label.upper()
+    except Exception:
+        return "NEUTRAL"
 
 
 def _fvg_regime_from_macro(macro: str) -> FVGRegime:

@@ -185,6 +185,7 @@ def run_gates(
     config: dict[str, Any] | None = None,
     api_key: str = "",
     dry_run: bool = False,
+    intended_direction: str | None = None,
 ) -> PipelineResult:
     """
     Run all five gates in sequence. Short-circuits on first rejection.
@@ -235,6 +236,32 @@ def run_gates(
     results.append(g3)
     if not g3.passed:
         return PipelineResult(passed=False, gate_results=results, reject_gate=3)
+
+    # Gate 3.5 (id=5): reject trades AGAINST the multi-TF trend.
+    # Empirically -0.51% avg pnl on the 116-trade ledger (n=6 AGAINST setups).
+    # If trend_context is None, this gate passes (unknown != against).
+    if trend_context is not None and trend_context.alignment == Alignment.AGAINST:
+        g5 = GateResult(gate_id=5, passed=False,
+                        reason=f"Rejected: FVG direction AGAINST trend "
+                               f"(HTF={trend_context.htf_bias.value}, "
+                               f"LTF={trend_context.ltf_bias.value}).")
+        results.append(g5)
+        return PipelineResult(passed=False, gate_results=results, reject_gate=5)
+
+    # Gate 6 (id=6): reject when caller-specified direction disagrees with the
+    # FVG we actually detected. Live scanner passes the detected direction so
+    # this becomes a self-consistency no-op. Backtest passes ledger direction,
+    # so this filters trades where SMC and ledger disagree on direction —
+    # empirically +12pp win rate on the agreement subset (56% vs 44%, n=91 vs n=25).
+    if (intended_direction is not None
+            and fvg_result.signal is not None
+            and fvg_result.signal.direction.value != intended_direction.upper()):
+        g6 = GateResult(gate_id=6, passed=False,
+                        reason=f"Rejected: intended direction {intended_direction} "
+                               f"disagrees with detected FVG "
+                               f"{fvg_result.signal.direction.value}.")
+        results.append(g6)
+        return PipelineResult(passed=False, gate_results=results, reject_gate=6)
 
     g4_gate, g4_result = _gate4_llm(
         ticker=ticker,
