@@ -1,34 +1,36 @@
 """
-Async Multi-Symbol Scanner
+Async Multi-Symbol Scanner (SMC-wired).
 
-Runs FVG detection + price fetch for every watchlist symbol concurrently
-using a thread-pool executor (yfinance is blocking/sync).
+Runs the full SMC pipeline (bar_aggregator -> fvg_detector -> trend_engine
+-> gate_pipeline -> position_sizer) for every EQUITY watchlist symbol
+concurrently via a thread-pool (Alpaca REST is blocking).
+
+Symbols with asset_class starting with "Crypto" are routed to the legacy
+crypto scanner path (src/crypto/scanner.py) which still uses its own feed.
 
 Typical speedup: 10 symbols sequential ~10s → parallel ~1-2s.
 
 Usage (standalone):
     python src/core/scanner/async_scanner.py
-    python src/core/scanner/async_scanner.py --tickers GLD CCJ ZIM
+    python src/core/scanner/async_scanner.py --tickers GLD SPY QQQ
     python src/core/scanner/async_scanner.py --watch          # live loop
 
 From code:
-    from src.core.scanner.async_scanner import scan_all
+    from src.core.scanner.async_scanner import scan_all, scan_all_sync
     results = asyncio.run(scan_all(watchlist_dict))
 """
-
 import asyncio
 import json
 import os
 import sys
 import time
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-import yfinance as yf
-
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
-from scanner import find_imbalances
+
+from src.smc.scanner import scan_symbol as _scan_equity_symbol
 from src.core.scanner.scan_result import ScanResult
 
 # One shared executor — reused across scan cycles to avoid thread-spawn overhead
@@ -38,194 +40,184 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=20, thread_name_prefix="ouroboros_sca
 # ---------------------------------------------------------------------------
 # Single-symbol worker (runs in thread pool)
 # ---------------------------------------------------------------------------
-
 def _scan_one(ticker: str, asset_class: str) -> ScanResult:
+    """
+    Route to the correct scanner based on asset_class:
+      - "Crypto*"  -> legacy crypto scanner (src/crypto/scanner.py)
+      - everything else -> SMC pipeline via src/smc/scanner.py
+
+    Preserves the ScanResult contract used by heartbeat.py, telegram_bot.py,
+    portfolio_report.py, and the ledger.
+    """
     t0 = time.monotonic()
-    try:
-        yf_sym = ticker.replace("/", "-")  # BTC/USD -> BTC-USD for yfinance
-        fvg = find_imbalances(yf_sym)
+    ac = (asset_class or "").strip()
 
-        # Fetch last price alongside the scan (reuse the same yf.Ticker object)
+    # Crypto path: unchanged, uses its own feed / scanner
+    if ac.lower().startswith("crypto"):
         try:
-            fast = yf.Ticker(yf_sym).fast_info
-            price = float(getattr(fast, "last_price", 0.0) or 0.0)
-        except Exception:
+            # TODO: replace with live crypto feed via Alpaca crypto data API
+            # once cost-freeze allows it. For now, delegate to existing scanner.
+            from src.crypto.scanner import scan_symbol as _crypto_scan
+            fvg = _crypto_scan(ticker, interval="15m")
+            fvg_dict = None
             price = 0.0
+            if fvg is not None:
+                # CryptoFVG -> dict shim to preserve ScanResult contract
+                fvg_dict = {
+                    "type":  getattr(fvg, "type", "BULL_FVG"),
+                    "size":  float(getattr(fvg, "size", 0.0)),
+                    "price": float(getattr(fvg, "price", 0.0)),
+                }
+                price = float(getattr(fvg, "price", 0.0))
+            return ScanResult(
+                ticker=ticker, asset_class=asset_class,
+                fvg=fvg_dict, price=price,
+                scan_ms=round((time.monotonic() - t0) * 1000, 1),
+                error=None,
+            )
+        except Exception as exc:
+            return ScanResult(
+                ticker=ticker, asset_class=asset_class,
+                fvg=None, price=0.0,
+                scan_ms=round((time.monotonic() - t0) * 1000, 1),
+                error=f"crypto scan failed: {type(exc).__name__}: {exc}",
+            )
 
-        return ScanResult(
-            ticker=ticker,
-            asset_class=asset_class,
-            fvg=fvg,
-            price=price,
-            scan_ms=round((time.monotonic() - t0) * 1000, 1),
-            error=None,
-        )
-    except Exception as exc:
-        return ScanResult(
-            ticker=ticker,
-            asset_class=asset_class,
-            fvg=None,
-            price=0.0,
-            scan_ms=round((time.monotonic() - t0) * 1000, 1),
-            error=str(exc),
-        )
+    # Equity path: full SMC pipeline
+    return _scan_equity_symbol(ticker, asset_class=asset_class)
 
 
 # ---------------------------------------------------------------------------
 # Async entry point
 # ---------------------------------------------------------------------------
-
 async def scan_all(
     watchlist: dict[str, str],
     timeout: float = 15.0,
 ) -> list[ScanResult]:
     """
-    Scan every ticker in watchlist concurrently.
+    Fan out one scan per watchlist entry.
 
     watchlist: {ticker: asset_class}
-    timeout:   seconds to wait before cancelling stragglers
+    timeout:   per-batch wall-clock cap in seconds
 
-    Returns list[ScanResult] in original watchlist order.
-    Order is preserved — errors surface as ScanResult.error != None.
+    Returns list[ScanResult] in completion order.
     """
-    loop = asyncio.get_event_loop()
-    order = list(watchlist.items())
-
-    coros = [
-        loop.run_in_executor(_EXECUTOR, _scan_one, ticker, ac)
-        for ticker, ac in order
+    loop = asyncio.get_running_loop()
+    tasks = [
+        loop.run_in_executor(_EXECUTOR, _scan_one, ticker, asset_class)
+        for ticker, asset_class in watchlist.items()
     ]
-
-    try:
-        results = await asyncio.wait_for(
-            asyncio.gather(*coros, return_exceptions=False),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError:
-        # Return whatever finished; timed-out ones get an error ScanResult
-        done, pending = await asyncio.wait(
-            [asyncio.ensure_future(c) for c in coros],
-            timeout=0,
-        )
-        result_map: dict[str, ScanResult] = {}
-        for fut in done:
-            if not fut.exception():
-                r = fut.result()
-                result_map[r.ticker] = r
-        results = [
-            result_map.get(tk, ScanResult(tk, ac, None, 0.0, timeout * 1000, "timeout"))
-            for tk, ac in order
-        ]
-
-    return list(results)
+    if not tasks:
+        return []
+    done, pending = await asyncio.wait(tasks, timeout=timeout)
+    results: list[ScanResult] = []
+    for t in done:
+        try:
+            results.append(t.result())
+        except Exception as exc:
+            results.append(ScanResult(
+                ticker="?", asset_class="?", fvg=None, price=0.0,
+                scan_ms=0.0, error=f"task crashed: {exc}",
+            ))
+    # Cancelled tasks -> record as timeouts
+    for t in pending:
+        t.cancel()
+        results.append(ScanResult(
+            ticker="?", asset_class="?", fvg=None, price=0.0,
+            scan_ms=round(timeout * 1000, 1),
+            error=f"scan timeout after {timeout}s",
+        ))
+    return results
 
 
 # ---------------------------------------------------------------------------
-# Batch helper — wraps scan_all for sync callers
+# Batch helper — wraps scan_all for sync callers (heartbeat.py)
 # ---------------------------------------------------------------------------
-
 def scan_all_sync(watchlist: dict[str, str], timeout: float = 15.0) -> list[ScanResult]:
     """Blocking wrapper around scan_all for use from sync code (e.g. heartbeat.py)."""
     return asyncio.run(scan_all(watchlist, timeout=timeout))
 
 
 # ---------------------------------------------------------------------------
-# Stats summary
+# Watchlist loading (preserved)
 # ---------------------------------------------------------------------------
-
-def scan_summary(results: list[ScanResult]) -> dict:
-    ok      = [r for r in results if r.ok]
-    fvgs    = [r for r in ok if r.has_fvg]
-    errors  = [r for r in results if not r.ok]
-    avg_ms  = round(sum(r.scan_ms for r in results) / len(results), 1) if results else 0
-
+def _load_watchlist() -> dict[str, str]:
+    """Load {ticker: asset_class} from the neutrality policy JSON.
+    Same source of truth as heartbeat.py (asset_mapping in the policy)."""
+    root = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    candidates = [
+        os.path.join(root, "config", "neutrality_policy.json"),
+        os.path.join(root, "neutrality_policy.json"),
+        os.path.join(root, "config", "watchlist.json"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            try:
+                with open(path, "r") as f:
+                    data = json.load(f)
+                mapping = (data.get("neutrality_priority", {})
+                               .get("asset_mapping")) or data.get("asset_mapping") or data
+                if isinstance(mapping, dict):
+                    return {str(k): str(v) for k, v in mapping.items()}
+            except Exception:
+                continue
+    # Fallback default: minimal universe, all Equity
     return {
-        "total":         len(results),
-        "ok":            len(ok),
-        "errors":        len(errors),
-        "fvg_signals":   len(fvgs),
-        "fvg_rate_pct":  round(len(fvgs) / len(ok) * 100, 1) if ok else 0,
-        "avg_scan_ms":   avg_ms,
-        "max_scan_ms":   max((r.scan_ms for r in results), default=0),
+        "SPY": "ETF-Equity", "QQQ": "ETF-Equity", "IWM": "ETF-Equity",
+        "GLD": "ETF-Commodity", "TLT": "ETF-Bond",
     }
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-
-def _load_watchlist() -> dict[str, str]:
-    policy_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", "config", "risk_policy.json"
-    )
-    with open(os.path.normpath(policy_path)) as f:
-        policy = json.load(f)
-    return policy.get("neutrality_priority", {}).get("asset_mapping", {})
-
-
-def _print_results(results: list[ScanResult], elapsed: float):
-    summary = scan_summary(results)
-    ts = datetime.now().strftime("%H:%M:%S")
-    sep = "=" * 66
-    dash = "-" * 66
-
-    print(f"\n{sep}")
-    print(f"  OUROBOROS v2 — ASYNC SCAN  [{ts}]  ({elapsed:.2f}s wall-clock)")
-    print(f"{sep}")
-    print(f"  {'Ticker':<10} {'Asset Class':<22} {'FVG':<12} {'Price':>10} {'ms':>6}  Status")
-    print(f"  {'-'*10} {'-'*22} {'-'*12} {'----------':>10} {'------':>6}  ------")
-
-    for r in sorted(results, key=lambda x: (not x.has_fvg, x.ticker)):
-        if not r.ok:
+def _print_table(results: list[ScanResult]) -> None:
+    print(f"\n{'Ticker':<10} {'AssetClass':<22} {'FVG':<12} {'Price':>10} {'ms':>6}")
+    print("-" * 72)
+    for r in results:
+        if r.error:
             print(f"  {r.ticker:<10} {r.asset_class:<22} {'ERROR':<12} {'—':>10} {r.scan_ms:>6.0f}  ⚠️  {r.error}")
-            continue
-        fvg_tag = f"{r.fvg_type}" if r.has_fvg else "—"
-        icon = "🔥" if r.has_fvg else "  "
-        print(f"  {r.ticker:<10} {r.asset_class:<22} {fvg_tag:<12} {r.price:>10.4f} {r.scan_ms:>6.0f}  {icon}")
-
-    print(f"{dash}")
-    print(
-        f"  {summary['ok']}/{summary['total']} ok | "
-        f"{summary['fvg_signals']} FVGs ({summary['fvg_rate_pct']}%) | "
-        f"avg {summary['avg_scan_ms']}ms | max {summary['max_scan_ms']}ms"
-    )
-    print(f"{sep}\n")
+        else:
+            fvg_tag = "-"
+            icon = ""
+            if r.fvg:
+                fvg_tag = r.fvg.get("type", "?")
+                icon = "🟢" if fvg_tag == "BULL_FVG" else "🔴"
+            print(f"  {r.ticker:<10} {r.asset_class:<22} {fvg_tag:<12} {r.price:>10.4f} {r.scan_ms:>6.0f}  {icon}")
 
 
-def parse_args():
-    p = argparse.ArgumentParser(description="Ouroboros v2 Async Scanner")
-    p.add_argument("--tickers", nargs="+", help="Override watchlist (e.g. GLD CCJ ZIM)")
-    p.add_argument("--watch", action="store_true", help="Continuous scan loop (Ctrl-C to stop)")
-    p.add_argument("--interval", type=int, default=300, help="Seconds between scans in --watch mode (default 300)")
-    p.add_argument("--timeout", type=float, default=15.0, help="Per-cycle timeout in seconds (default 15)")
-    return p.parse_args()
+def _main() -> int:
+    ap = argparse.ArgumentParser(description="Ouroboros async SMC scanner")
+    ap.add_argument("--tickers", nargs="+", help="Override watchlist with these tickers")
+    ap.add_argument("--asset-class", default="Equity",
+                    help="Asset class label when --tickers is used (default Equity)")
+    ap.add_argument("--timeout", type=float, default=15.0)
+    ap.add_argument("--watch", action="store_true", help="Loop every 60s")
+    args = ap.parse_args()
+
+    watchlist = _load_watchlist()
+    if args.tickers:
+        watchlist = {t.upper(): args.asset_class for t in args.tickers}
+
+    async def _once() -> list[ScanResult]:
+        return await scan_all(watchlist, timeout=args.timeout)
+
+    if args.watch:
+        try:
+            while True:
+                t0 = time.monotonic()
+                results = asyncio.run(_once())
+                print(f"\n[{datetime.utcnow().isoformat(timespec='seconds')}Z] "
+                      f"scanned {len(results)} in {(time.monotonic()-t0)*1000:.0f}ms")
+                _print_table(results)
+                time.sleep(max(0.0, 60.0 - (time.monotonic() - t0)))
+        except KeyboardInterrupt:
+            return 0
+    else:
+        results = asyncio.run(_once())
+        _print_table(results)
+        return 0
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    watchlist = _load_watchlist()
-
-    if args.tickers:
-        watchlist = {t: watchlist.get(t, "Unknown") for t in args.tickers}
-
-    if not watchlist:
-        print("No tickers to scan.")
-        sys.exit(1)
-
-    async def _run_once():
-        t0 = time.monotonic()
-        results = await scan_all(watchlist, timeout=args.timeout)
-        elapsed = time.monotonic() - t0
-        _print_results(results, elapsed)
-        return results
-
-    if args.watch:
-        print(f"Starting live scan loop — {len(watchlist)} symbols every {args.interval}s  (Ctrl-C to stop)")
-        try:
-            while True:
-                asyncio.run(_run_once())
-                time.sleep(args.interval)
-        except KeyboardInterrupt:
-            print("\nStopped.")
-    else:
-        asyncio.run(_run_once())
+    sys.exit(_main())

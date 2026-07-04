@@ -1,0 +1,231 @@
+"""
+Async Multi-Symbol Scanner
+
+Runs FVG detection + price fetch for every watchlist symbol concurrently
+using a thread-pool executor (yfinance is blocking/sync).
+
+Typical speedup: 10 symbols sequential ~10s → parallel ~1-2s.
+
+Usage (standalone):
+    python src/core/scanner/async_scanner.py
+    python src/core/scanner/async_scanner.py --tickers GLD CCJ ZIM
+    python src/core/scanner/async_scanner.py --watch          # live loop
+
+From code:
+    from src.core.scanner.async_scanner import scan_all
+    results = asyncio.run(scan_all(watchlist_dict))
+"""
+
+import asyncio
+import json
+import os
+import sys
+import time
+import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+
+import yfinance as yf
+
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+from scanner import find_imbalances
+from src.core.scanner.scan_result import ScanResult
+
+# One shared executor — reused across scan cycles to avoid thread-spawn overhead
+_EXECUTOR = ThreadPoolExecutor(max_workers=20, thread_name_prefix="ouroboros_scan")
+
+
+# ---------------------------------------------------------------------------
+# Single-symbol worker (runs in thread pool)
+# ---------------------------------------------------------------------------
+
+def _scan_one(ticker: str, asset_class: str) -> ScanResult:
+    t0 = time.monotonic()
+    try:
+        yf_sym = ticker.replace("/", "-")  # BTC/USD -> BTC-USD for yfinance
+        fvg = find_imbalances(yf_sym)
+
+        # Fetch last price alongside the scan (reuse the same yf.Ticker object)
+        try:
+            fast = yf.Ticker(yf_sym).fast_info
+            price = float(getattr(fast, "last_price", 0.0) or 0.0)
+        except Exception:
+            price = 0.0
+
+        return ScanResult(
+            ticker=ticker,
+            asset_class=asset_class,
+            fvg=fvg,
+            price=price,
+            scan_ms=round((time.monotonic() - t0) * 1000, 1),
+            error=None,
+        )
+    except Exception as exc:
+        return ScanResult(
+            ticker=ticker,
+            asset_class=asset_class,
+            fvg=None,
+            price=0.0,
+            scan_ms=round((time.monotonic() - t0) * 1000, 1),
+            error=str(exc),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Async entry point
+# ---------------------------------------------------------------------------
+
+async def scan_all(
+    watchlist: dict[str, str],
+    timeout: float = 15.0,
+) -> list[ScanResult]:
+    """
+    Scan every ticker in watchlist concurrently.
+
+    watchlist: {ticker: asset_class}
+    timeout:   seconds to wait before cancelling stragglers
+
+    Returns list[ScanResult] in original watchlist order.
+    Order is preserved — errors surface as ScanResult.error != None.
+    """
+    loop = asyncio.get_event_loop()
+    order = list(watchlist.items())
+
+    coros = [
+        loop.run_in_executor(_EXECUTOR, _scan_one, ticker, ac)
+        for ticker, ac in order
+    ]
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*coros, return_exceptions=False),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        # Return whatever finished; timed-out ones get an error ScanResult
+        done, pending = await asyncio.wait(
+            [asyncio.ensure_future(c) for c in coros],
+            timeout=0,
+        )
+        result_map: dict[str, ScanResult] = {}
+        for fut in done:
+            if not fut.exception():
+                r = fut.result()
+                result_map[r.ticker] = r
+        results = [
+            result_map.get(tk, ScanResult(tk, ac, None, 0.0, timeout * 1000, "timeout"))
+            for tk, ac in order
+        ]
+
+    return list(results)
+
+
+# ---------------------------------------------------------------------------
+# Batch helper — wraps scan_all for sync callers
+# ---------------------------------------------------------------------------
+
+def scan_all_sync(watchlist: dict[str, str], timeout: float = 15.0) -> list[ScanResult]:
+    """Blocking wrapper around scan_all for use from sync code (e.g. heartbeat.py)."""
+    return asyncio.run(scan_all(watchlist, timeout=timeout))
+
+
+# ---------------------------------------------------------------------------
+# Stats summary
+# ---------------------------------------------------------------------------
+
+def scan_summary(results: list[ScanResult]) -> dict:
+    ok      = [r for r in results if r.ok]
+    fvgs    = [r for r in ok if r.has_fvg]
+    errors  = [r for r in results if not r.ok]
+    avg_ms  = round(sum(r.scan_ms for r in results) / len(results), 1) if results else 0
+
+    return {
+        "total":         len(results),
+        "ok":            len(ok),
+        "errors":        len(errors),
+        "fvg_signals":   len(fvgs),
+        "fvg_rate_pct":  round(len(fvgs) / len(ok) * 100, 1) if ok else 0,
+        "avg_scan_ms":   avg_ms,
+        "max_scan_ms":   max((r.scan_ms for r in results), default=0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _load_watchlist() -> dict[str, str]:
+    policy_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "config", "risk_policy.json"
+    )
+    with open(os.path.normpath(policy_path)) as f:
+        policy = json.load(f)
+    return policy.get("neutrality_priority", {}).get("asset_mapping", {})
+
+
+def _print_results(results: list[ScanResult], elapsed: float):
+    summary = scan_summary(results)
+    ts = datetime.now().strftime("%H:%M:%S")
+    sep = "=" * 66
+    dash = "-" * 66
+
+    print(f"\n{sep}")
+    print(f"  OUROBOROS v2 — ASYNC SCAN  [{ts}]  ({elapsed:.2f}s wall-clock)")
+    print(f"{sep}")
+    print(f"  {'Ticker':<10} {'Asset Class':<22} {'FVG':<12} {'Price':>10} {'ms':>6}  Status")
+    print(f"  {'-'*10} {'-'*22} {'-'*12} {'----------':>10} {'------':>6}  ------")
+
+    for r in sorted(results, key=lambda x: (not x.has_fvg, x.ticker)):
+        if not r.ok:
+            print(f"  {r.ticker:<10} {r.asset_class:<22} {'ERROR':<12} {'—':>10} {r.scan_ms:>6.0f}  ⚠️  {r.error}")
+            continue
+        fvg_tag = f"{r.fvg_type}" if r.has_fvg else "—"
+        icon = "🔥" if r.has_fvg else "  "
+        print(f"  {r.ticker:<10} {r.asset_class:<22} {fvg_tag:<12} {r.price:>10.4f} {r.scan_ms:>6.0f}  {icon}")
+
+    print(f"{dash}")
+    print(
+        f"  {summary['ok']}/{summary['total']} ok | "
+        f"{summary['fvg_signals']} FVGs ({summary['fvg_rate_pct']}%) | "
+        f"avg {summary['avg_scan_ms']}ms | max {summary['max_scan_ms']}ms"
+    )
+    print(f"{sep}\n")
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Ouroboros v2 Async Scanner")
+    p.add_argument("--tickers", nargs="+", help="Override watchlist (e.g. GLD CCJ ZIM)")
+    p.add_argument("--watch", action="store_true", help="Continuous scan loop (Ctrl-C to stop)")
+    p.add_argument("--interval", type=int, default=300, help="Seconds between scans in --watch mode (default 300)")
+    p.add_argument("--timeout", type=float, default=15.0, help="Per-cycle timeout in seconds (default 15)")
+    return p.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    watchlist = _load_watchlist()
+
+    if args.tickers:
+        watchlist = {t: watchlist.get(t, "Unknown") for t in args.tickers}
+
+    if not watchlist:
+        print("No tickers to scan.")
+        sys.exit(1)
+
+    async def _run_once():
+        t0 = time.monotonic()
+        results = await scan_all(watchlist, timeout=args.timeout)
+        elapsed = time.monotonic() - t0
+        _print_results(results, elapsed)
+        return results
+
+    if args.watch:
+        print(f"Starting live scan loop — {len(watchlist)} symbols every {args.interval}s  (Ctrl-C to stop)")
+        try:
+            while True:
+                asyncio.run(_run_once())
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\nStopped.")
+    else:
+        asyncio.run(_run_once())
